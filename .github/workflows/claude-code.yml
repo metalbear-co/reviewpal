@@ -25,3 +25,5 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_args: |
+            --custom-instructions "Be casual and conversational. Explain what the PR does in 2-3 sentences like you're talking to a friend. Use 'Hey' or 'So' to start. Skip the formal bullet points unless asked for detailed review."
