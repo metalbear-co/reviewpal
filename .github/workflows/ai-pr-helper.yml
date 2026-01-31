@@ -1,4 +1,4 @@
-name: PR Questions
+name: AI PR Helper
 
 on:
   issue_comment:
