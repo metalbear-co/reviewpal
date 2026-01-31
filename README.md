@@ -6,8 +6,6 @@
 
 ## ⏱️ Quick Start (5 minutes)
 
-### For MetalBear PRs
-
 1. **Copy the workflow file** to your repo:
 
 ```bash
