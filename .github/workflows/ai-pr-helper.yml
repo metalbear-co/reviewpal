@@ -21,7 +21,6 @@ jobs:
           script: |
             const https = require('https');
             
-            // Call Anthropic API
             function callAnthropic(prompt, apiKey) {
               return new Promise((resolve, reject) => {
                 const body = JSON.stringify({
@@ -58,45 +57,31 @@ jobs:
               });
             }
             
-            // Fetch PR
-            const { data: pr } = await github.rest.pulls.get({
+            const pr = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: context.issue.number
             });
             
-            // Fetch files
-            const { data: files } = await github.rest.pulls.listFiles({
+            const files = await github.rest.pulls.listFiles({
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: context.issue.number
             });
             
-            // Build context
-            const fileCtx = files.slice(0, 5).map(f => 
-              `\n### ${f.filename} (${f.status})\n\`\`\`\n${f.patch || 'no changes'}\n\`\`\``
+            const fileCtx = files.data.slice(0, 5).map(f => 
+              '\n### ' + f.filename + ' (' + f.status + ')\n```\n' + (f.patch || 'no changes') + '\n```'
             ).join('\n');
             
-            const prompt = `Help a developer understand this Pull Request.
-
-PR: ${pr.title}
-Description: ${pr.body || 'none'}
-
-Files:${fileCtx}
-
-Question: ${context.payload.comment.body}
-
-Answer in 2-4 sentences. Be specific and reference the code.`;
+            const prompt = 'Help a developer understand this Pull Request.\n\nPR: ' + pr.data.title + '\nDescription: ' + (pr.data.body || 'none') + '\n\nFiles:' + fileCtx + '\n\nQuestion: ' + context.payload.comment.body + '\n\nAnswer in 2-4 sentences. Be specific and reference the code.';
             
-            // Get answer
             const answer = await callAnthropic(prompt, process.env.ANTHROPIC_API_KEY);
             
-            // Post reply
             if (answer) {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                body: `${answer}\n\n<sub>🤖 AI answer</sub>`
+                body: answer + '\n\n<sub>🤖 AI answer</sub>'
               });
             }
