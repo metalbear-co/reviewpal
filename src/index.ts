@@ -194,15 +194,18 @@ async function main(): Promise<void> {
       switch (context.action) {
         case 'opened':
         case 'synchronize':
-          // New or updated PR
-          if (config.mode === 'auto' || config.mode === 'draft-only') {
-            await handleDraftPR(github, claude, prNumber, config);
-          }
-          break;
-
         case 'ready_for_review':
-          // PR marked ready
-          if (config.mode === 'auto' || config.mode === 'ready-only') {
+          // New, updated, or ready PR - route based on draft status
+          if (config.mode === 'auto') {
+            const pr = await github.getPullRequest(prNumber);
+            if (pr.draft) {
+              await handleDraftPR(github, claude, prNumber, config);
+            } else {
+              await handleReadyPR(github, claude, prNumber, config);
+            }
+          } else if (config.mode === 'draft-only') {
+            await handleDraftPR(github, claude, prNumber, config);
+          } else if (config.mode === 'ready-only') {
             await handleReadyPR(github, claude, prNumber, config);
           }
           break;
