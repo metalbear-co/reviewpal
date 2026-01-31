@@ -2,13 +2,17 @@
 
 /**
  * Analyze PR diff using Anthropic API
- * Usage: node analyze.js <diff-file>
+ * Usage: node analyze.js <diff-file> <pr-number>
  */
 
 const fs = require('fs');
 const https = require('https');
+const { execSync } = require('child_process');
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const GH_TOKEN = process.env.GH_TOKEN;
+const REPO_OWNER = process.env.REPO_OWNER;
+const REPO_NAME = process.env.REPO_NAME;
 
 if (!ANTHROPIC_API_KEY) {
   console.error('Error: ANTHROPIC_API_KEY environment variable not set');
@@ -16,14 +20,32 @@ if (!ANTHROPIC_API_KEY) {
 }
 
 const diffFile = process.argv[2];
+const prNumber = process.argv[3];
+
 if (!diffFile) {
-  console.error('Usage: node analyze.js <diff-file>');
+  console.error('Usage: node analyze.js <diff-file> <pr-number>');
   process.exit(1);
 }
 
 const diff = fs.readFileSync(diffFile, 'utf-8');
 
-const prompt = `Analyze this code diff for CRITICAL issues only. Ignore style, linting, and obvious code.
+function getPRMetadata() {
+  if (!prNumber || !GH_TOKEN) {
+    return { title: '', body: '' };
+  }
+
+  try {
+    const result = execSync(
+      `gh pr view ${prNumber} --json title,body`,
+      { encoding: 'utf-8', env: { ...process.env, GH_TOKEN } }
+    );
+    return JSON.parse(result);
+  } catch (error) {
+    return { title: '', body: '' };
+  }
+}
+
+const issuesPrompt = `Analyze this code diff for CRITICAL issues only. Ignore style, linting, and obvious code.
 
 ONLY report:
 - Security vulnerabilities (SQL injection, XSS, auth bypass, secrets)
@@ -54,6 +76,18 @@ If no critical issues, return: []
 
 Diff:
 ${diff}`;
+
+function buildIntentPrompt(prMeta) {
+  return `Based on this PR title and description, explain what this PR is trying to accomplish in 3 sentences. Write in a conversational, human tone - not robotic or corporate. Be specific and helpful.
+
+PR Title: ${prMeta.title}
+PR Description: ${prMeta.body || 'No description provided'}
+
+Code changes:
+${diff.split('\n').slice(0, 50).join('\n')}
+
+Respond with ONLY 3 sentences explaining the intent. No preamble, no labels, just the sentences.`;
+}
 
 function callAnthropic(prompt) {
   return new Promise((resolve, reject) => {
@@ -113,18 +147,21 @@ function callAnthropic(prompt) {
 
 async function main() {
   try {
-    const response = await callAnthropic(prompt);
-    const content = response.content[0].text;
+    const prMeta = getPRMetadata();
     
-    // Extract JSON array from response
-    const jsonMatch = content.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) {
-      console.log('[]');
-      return;
-    }
+    // Analyze issues
+    const issuesResponse = await callAnthropic(issuesPrompt);
+    const issuesContent = issuesResponse.content[0].text;
+    const jsonMatch = issuesContent.match(/\[[\s\S]*\]/);
+    const issues = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
     
-    const issues = JSON.parse(jsonMatch[0]);
-    console.log(JSON.stringify(issues, null, 2));
+    // Generate intent summary
+    const intentPrompt = buildIntentPrompt(prMeta);
+    const intentResponse = await callAnthropic(intentPrompt);
+    const intent = intentResponse.content[0].text.trim();
+    
+    // Output combined result
+    console.log(JSON.stringify({ intent, issues }, null, 2));
   } catch (error) {
     console.error('Error:', error.message);
     process.exit(1);

@@ -13,7 +13,9 @@ if (!resultsFile) {
   process.exit(1);
 }
 
-const issues = JSON.parse(fs.readFileSync(resultsFile, 'utf-8'));
+const result = JSON.parse(fs.readFileSync(resultsFile, 'utf-8'));
+const intent = result.intent || '';
+const issues = result.issues || [];
 
 const SEVERITY = {
   CRITICAL: { emoji: '💀', label: 'CRITICAL (review first)', priority: 1 },
@@ -36,21 +38,29 @@ function groupBySeverity(issues) {
   return grouped;
 }
 
-function formatReport(issues) {
+function formatReport(intent, issues) {
+  let report = '# 🔍 Code Review\n\n';
+  
+  // Add intent summary if available
+  if (intent) {
+    report += `## What's this PR doing?\n\n${intent}\n\n---\n\n`;
+  }
+  
   if (issues.length === 0) {
-    return `# 🔍 Code Review
-
-✅ **No critical issues found**
-
-This PR looks good from a security and performance perspective.`;
+    report += `✅ **No critical issues found**\n\n`;
+    report += `This PR looks good from a security and performance perspective.`;
+    
+    if (!intent) {
+      report += '\n\n<sub>🤖 Automated review powered by Claude Opus</sub>';
+    }
+    
+    return report;
   }
 
   const grouped = groupBySeverity(issues);
   const sortedSeverities = Object.keys(grouped).sort((a, b) => 
     SEVERITY[a].priority - SEVERITY[b].priority
   );
-
-  let report = '# 🔍 Code Review\n\n';
 
   sortedSeverities.forEach(severity => {
     const { emoji, label } = SEVERITY[severity];
@@ -85,5 +95,5 @@ This PR looks good from a security and performance perspective.`;
   return report;
 }
 
-const report = formatReport(issues);
+const report = formatReport(intent, issues);
 console.log(report);
