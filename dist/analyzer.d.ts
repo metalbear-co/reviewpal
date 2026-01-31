@@ -25,6 +25,7 @@ export declare function formatIndexComment(analysis: InlineAnalysis, commentLink
     line: number;
     title: string;
     severity: Severity;
+    body: string;
 }>): string;
 /**
  * Format PR summary as a GitHub comment with clickable navigation

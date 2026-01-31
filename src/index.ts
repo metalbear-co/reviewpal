@@ -128,12 +128,13 @@ async function handleReadyPR(
 
   core.info(`Posted ${commentResults.length} review comments`);
 
-  // Create index comment with navigation
+  // Create index comment with navigation (include all comments, even ones not posted inline)
   const commentLinks = analysis.comments.map((c) => ({
     path: c.file,
     line: c.line,
     title: c.title,
     severity: c.severity,
+    body: c.body,
   }));
 
   const indexComment = formatIndexComment(analysis, commentLinks);

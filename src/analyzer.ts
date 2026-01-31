@@ -165,7 +165,7 @@ Guidelines:
     estimatedReadTimeMinutes: number;
   }>(systemPrompt, userPrompt, { maxTokens: 4096 });
 
-  // Format comments with collapsible details
+  // Format comments - keep inline simple since <details> doesn't work in review comments
   const comments: InlineComment[] = response.comments.map((c) => {
     const emoji = getEmojiForSeverity(c.severity);
     return {
@@ -173,13 +173,11 @@ Guidelines:
       line: c.line,
       title: c.title,
       severity: c.severity,
-      body: `<details>
-<summary>${emoji} <strong>${c.title}</strong></summary>
+      body: `${emoji} **${c.title}**
 
 **What:** ${c.what}  
 **Why:** ${c.why}  
-**Action:** ${c.action}
-</details>`,
+**Action:** ${c.action}`,
     };
   });
 
@@ -280,7 +278,7 @@ Guidelines:
  */
 export function formatIndexComment(
   analysis: InlineAnalysis,
-  commentLinks: Array<{ path: string; line: number; title: string; severity: Severity }>
+  commentLinks: Array<{ path: string; line: number; title: string; severity: Severity; body: string }>
 ): string {
   const header = `## 📋 Quick Navigation
 
@@ -327,13 +325,16 @@ Found ${commentLinks.length} items for review (~${analysis.estimatedReadTimeMinu
     }
 
     for (const item of items) {
-      // GitHub doesn't support direct linking to review comments from issues,
-      // but we can at least show the location
-      navigation += `${index}. **${item.title}** → \`${item.path}:${item.line}\`\n`;
+      const emoji = getEmojiForSeverity(item.severity);
+      // Make each finding collapsible with full details
+      navigation += `<details>\n<summary>${index}. ${emoji} <strong>${item.title}</strong> → <code>${item.path}:${item.line}</code></summary>\n\n`;
+      navigation += `${item.body}\n\n`;
+      navigation += `[View in diff →](${item.path}#L${item.line})\n\n`;
+      navigation += `</details>\n\n`;
       index++;
     }
     
-    navigation += '\n</details>\n\n';
+    navigation += '</details>\n\n';
   }
 
   const footer = `---
