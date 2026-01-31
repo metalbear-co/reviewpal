@@ -1,0 +1,104 @@
+diff --git a/test-sample.tsx b/test-sample.tsx
+new file mode 100644
+index 0000000..abc1234
+--- /dev/null
++++ b/test-sample.tsx
+@@ -0,0 +1,95 @@
++// Sample AI-generated code with common issues
++import React, { useState, useEffect } from 'react';
++
++export function UserProfile({ userId }: { userId: string }) {
++  const [user, setUser] = useState(null);
++  const [loading, setLoading] = useState(false);
++  const [error, setError] = useState(null);
++  const [isEditing, setIsEditing] = useState(false);
++  const [hasChanges, setHasChanges] = useState(false);
++  const [isSaving, setIsSaving] = useState(false);
++
++  useEffect(() => {
++    // Fetch user data
++    const fetchUser = async () => {
++      try {
++        setLoading(true);
++        try {
++          const response = await fetch(`/api/users/${userId}`);
++          try {
++            const data = await response.json();
++            try {
++              setUser(data);
++            } catch (err) {
++              console.error('Error setting user:', err);
++              setError(err?.message ?? 'Unknown error');
++            }
++          } catch (err) {
++            console.error('Error parsing JSON:', err);
++            setError(err?.message ?? 'Unknown error');
++          }
++        } catch (err) {
++          console.error('Error fetching:', err);
++          setError(err?.message ?? 'Unknown error');
++        }
++      } catch (err) {
++        console.error('Error in fetchUser:', err);
++        setError(err?.message ?? 'Unknown error');
++      } finally {
++        setLoading(false);
++      }
++    };
++
++    fetchUser();
++  }, [userId]);
++
++  const handleSave = async () => {
++    try {
++      setIsSaving(true);
++      try {
++        const response = await fetch(`/api/users/${userId}`, {
++          method: 'PUT',
++          headers: {
++            'Content-Type': 'application/json',
++          },
++          body: JSON.stringify(user),
++        });
++        try {
++          const data = await response.json();
++          try {
++            setUser(data);
++            setHasChanges(false);
++            setIsEditing(false);
++          } catch (err) {
++            console.error('Error updating user:', err);
++          }
++        } catch (err) {
++          console.error('Error parsing response:', err);
++        }
++      } catch (err) {
++        console.error('Error saving:', err);
++      }
++    } catch (err) {
++      console.error('Error in handleSave:', err);
++    } finally {
++      setIsSaving(false);
++    }
++  };
++
++  if (loading) {
++    return <div style={{ padding: '20px' }}>Loading...</div>;
++  }
++
++  if (error) {
++    return <div style={{ color: 'red', padding: '20px' }}>Error: {error}</div>;
++  }
++
++  return (
++    <div style={{ padding: '20px', border: '1px solid #ccc' }}>
++      <h1 style={{ fontSize: '24px', marginBottom: '10px' }}>User Profile</h1>
++      {user && (
++        <div style={{ marginTop: '10px' }}>
++          <p style={{ marginBottom: '5px' }}>Name: {user.name}</p>
++          <p style={{ marginBottom: '5px' }}>Email: {user.email}</p>
++        </div>
++      )}
++    </div>
++  );
++}

@@ -421,7 +421,7 @@ export function formatFriendlyReviewResult(result: ReviewResult): string {
   
   // Footer
   parts.push('---');
-  parts.push(`<sub>Reviewed ${result.totalHunks} changes • ${(result.totalProcessingTime / 1000).toFixed(1)}s • [How to disable](https://github.com/your-org/ai-review-helper#configuration)</sub>`);
+  parts.push(`<sub>Reviewed ${result.totalHunks} changes • ${(result.totalProcessingTime / 1000).toFixed(1)}s • [How to disable](https://github.com/Arephan/reviewpal#configuration)</sub>`);
   
   return parts.join('\n');
 }
