@@ -1,19 +1,12 @@
-"use strict";
 /**
  * Intent Analyzer - Analyzes PR changes and generates inline diff comments
  *
  * Feature 2: Smart PR Breakdown (Opus-Powered)
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.getEmojiForSeverity = getEmojiForSeverity;
-exports.analyzeInline = analyzeInline;
-exports.analyzePR = analyzePR;
-exports.formatIndexComment = formatIndexComment;
-exports.formatSummaryComment = formatSummaryComment;
 /**
  * Get emoji for severity
  */
-function getEmojiForSeverity(severity) {
+export function getEmojiForSeverity(severity) {
     const emojiMap = {
         explanation: '📖',
         warning: '⚠️',
@@ -57,7 +50,7 @@ function parseDiffLineNumbers(patch) {
 /**
  * Analyze PR and generate inline comments using Claude
  */
-async function analyzeInline(pr, claude) {
+export async function analyzeInline(pr, claude) {
     const systemPrompt = `You are a senior code reviewer analyzing a pull request.
 
 Your job is to:
@@ -174,7 +167,7 @@ Guidelines:
 /**
  * Analyze PR and group changes by intent using Claude (legacy format)
  */
-async function analyzePR(pr, claude) {
+export async function analyzePR(pr, claude) {
     const systemPrompt = `You are a senior code reviewer creating a navigable summary of a PR.
 
 Your job is to:
@@ -251,7 +244,7 @@ Guidelines:
 /**
  * Format index comment with navigation links to inline comments
  */
-function formatIndexComment(analysis, commentLinks) {
+export function formatIndexComment(analysis, commentLinks) {
     const header = `## 📋 Quick Navigation
 
 Found ${commentLinks.length} items for review (~${analysis.estimatedReadTimeMinutes} min read)
@@ -294,7 +287,7 @@ Found ${commentLinks.length} items for review (~${analysis.estimatedReadTimeMinu
 /**
  * Format PR summary as a GitHub comment with clickable navigation
  */
-function formatSummaryComment(summary, prNumber) {
+export function formatSummaryComment(summary, prNumber) {
     const header = `## 📋 PR Summary (${summary.totalChanges} changes, ~${summary.estimatedReadTimeMinutes} min)
 
 `;
@@ -379,4 +372,3 @@ function getEmojiForGroup(name) {
         return '📚';
     return '📦';
 }
-//# sourceMappingURL=analyzer.js.map

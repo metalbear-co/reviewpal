@@ -35644,15 +35644,179 @@ function wrappy (fn, cb) {
 "use strict";
 
 /**
- * Intent Analyzer - Groups PR changes by intent and creates summaries
+ * Intent Analyzer - Analyzes PR changes and generates inline diff comments
  *
  * Feature 2: Smart PR Breakdown (Opus-Powered)
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getEmojiForSeverity = getEmojiForSeverity;
+exports.analyzeInline = analyzeInline;
 exports.analyzePR = analyzePR;
+exports.formatIndexComment = formatIndexComment;
 exports.formatSummaryComment = formatSummaryComment;
 /**
- * Analyze PR and group changes by intent using Claude
+ * Get emoji for severity
+ */
+function getEmojiForSeverity(severity) {
+    const emojiMap = {
+        explanation: '📖',
+        warning: '⚠️',
+        bug: '🐛',
+        security: '🔒',
+        suggestion: '🎨',
+    };
+    return emojiMap[severity];
+}
+/**
+ * Format inline comment body
+ */
+function formatInlineCommentBody(comment) {
+    const emoji = getEmojiForSeverity(comment.severity);
+    return comment.body.trim();
+}
+/**
+ * Parse diff to extract line numbers for added/modified lines
+ */
+function parseDiffLineNumbers(patch) {
+    const lines = [];
+    const hunkHeaderRegex = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
+    let currentLine = 0;
+    const patchLines = patch.split('\n');
+    for (const line of patchLines) {
+        const match = line.match(hunkHeaderRegex);
+        if (match) {
+            currentLine = parseInt(match[1], 10);
+            continue;
+        }
+        if (line.startsWith('+') && !line.startsWith('+++')) {
+            lines.push(currentLine);
+            currentLine++;
+        }
+        else if (!line.startsWith('-')) {
+            currentLine++;
+        }
+    }
+    return lines;
+}
+/**
+ * Analyze PR and generate inline comments using Claude
+ */
+async function analyzeInline(pr, claude) {
+    const systemPrompt = `You are a senior code reviewer analyzing a pull request.
+
+Your job is to:
+1. Review each diff hunk carefully
+2. Identify specific lines that need reviewer attention
+3. Categorize issues by severity
+4. Provide clear, actionable feedback
+
+Severity levels:
+- 📖 **explanation** - Context/what this does (informational)
+- ⚠️ **warning** - Needs review, potential issue
+- 🐛 **bug** - Logic error, edge case
+- 🔒 **security** - Auth, XSS, injection risks
+- 🎨 **suggestion** - Optional improvement
+
+Focus on:
+- Security vulnerabilities (auth bypass, XSS, SQL injection, secrets)
+- Logic errors and edge cases
+- Missing error handling
+- Performance issues
+- Important context that helps reviewers understand the change
+
+Skip:
+- Style/formatting (unless it affects readability)
+- Obvious changes
+- Minor nitpicks`;
+    const fileList = pr.files
+        .map((f) => `- ${f.filename} (+${f.additions}/-${f.deletions}): ${f.status}`)
+        .join('\n');
+    const patches = pr.files
+        .filter((f) => f.patch)
+        .map((f) => {
+        const lineNumbers = parseDiffLineNumbers(f.patch);
+        return `### ${f.filename}
+Available lines for comments: ${lineNumbers.join(', ')}
+
+\`\`\`diff
+${f.patch}
+\`\`\``;
+    })
+        .join('\n\n');
+    const userPrompt = `# PR #${pr.number}: ${pr.title}
+
+## PR Description
+${pr.body ?? 'No description provided'}
+
+## Files Changed (${pr.files.length} files, +${pr.additions}/-${pr.deletions})
+${fileList}
+
+## Full Diff
+${patches.slice(0, 30000)}
+
+---
+
+Analyze this PR and generate inline comments for specific lines that need attention.
+
+For each comment, provide:
+1. **file** - The filename
+2. **line** - The line number (must be from the "Available lines" list above)
+3. **title** - Short title (max 50 chars)
+4. **severity** - One of: explanation, warning, bug, security, suggestion
+5. **what** - Brief description of what this code does
+6. **why** - Why this needs attention
+7. **action** - What the reviewer should do
+
+Return JSON in this format:
+{
+  "comments": [
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 12,
+      "title": "Workflow permissions",
+      "severity": "explanation",
+      "what": "Sets workflow permissions to read-only by default",
+      "why": "This is a security best practice to limit token scope",
+      "action": "Verify this doesn't break any deployment steps"
+    },
+    {
+      "file": "src/api/auth.ts",
+      "line": 45,
+      "title": "Missing input validation",
+      "severity": "bug",
+      "what": "User input from request body is used directly",
+      "why": "Could allow injection attacks or unexpected data types",
+      "action": "Add schema validation (zod/joi) before using user input"
+    }
+  ],
+  "estimatedReadTimeMinutes": 8
+}
+
+Guidelines:
+- Aim for 5-15 comments total (focus on what matters most)
+- Line numbers MUST be from the "Available lines" lists
+- Be specific and actionable
+- Prioritize security > bugs > warnings > suggestions > explanations`;
+    const response = await claude.completeJSON(systemPrompt, userPrompt, { maxTokens: 4096 });
+    // Format comments
+    const comments = response.comments.map((c) => ({
+        file: c.file,
+        line: c.line,
+        title: c.title,
+        severity: c.severity,
+        body: `${getEmojiForSeverity(c.severity)} **${c.title}**
+
+**What:** ${c.what}
+**Why:** ${c.why}
+**Action:** ${c.action}`,
+    }));
+    return {
+        comments,
+        estimatedReadTimeMinutes: response.estimatedReadTimeMinutes,
+    };
+}
+/**
+ * Analyze PR and group changes by intent using Claude (legacy format)
  */
 async function analyzePR(pr, claude) {
     const systemPrompt = `You are a senior code reviewer creating a navigable summary of a PR.
@@ -35727,6 +35891,49 @@ Guidelines:
         estimatedReadTimeMinutes: response.estimatedReadTimeMinutes,
         groups: response.groups,
     };
+}
+/**
+ * Format index comment with navigation links to inline comments
+ */
+function formatIndexComment(analysis, commentLinks) {
+    const header = `## 📋 Quick Navigation
+
+Found ${commentLinks.length} items for review (~${analysis.estimatedReadTimeMinutes} min read)
+
+`;
+    // Group by severity for better organization
+    const groups = {
+        security: [],
+        bug: [],
+        warning: [],
+        suggestion: [],
+        explanation: [],
+    };
+    commentLinks.forEach((link) => {
+        groups[link.severity].push(link);
+    });
+    let navigation = '';
+    let index = 1;
+    // Order by priority
+    const severities = ['security', 'bug', 'warning', 'suggestion', 'explanation'];
+    for (const severity of severities) {
+        const items = groups[severity];
+        if (items.length === 0)
+            continue;
+        const emoji = getEmojiForSeverity(severity);
+        navigation += `### ${emoji} ${severity.charAt(0).toUpperCase() + severity.slice(1)}\n\n`;
+        for (const item of items) {
+            // GitHub doesn't support direct linking to review comments from issues,
+            // but we can at least show the location
+            navigation += `${index}. **${item.title}** → \`${item.path}:${item.line}\`\n`;
+            index++;
+        }
+        navigation += '\n';
+    }
+    const footer = `---
+
+<sub>🦞 AI PR Helper v2 | Inline Review Mode | Powered by Claude</sub>`;
+    return header + navigation + footer;
 }
 /**
  * Format PR summary as a GitHub comment with clickable navigation
@@ -36362,6 +36569,49 @@ class GitHubClient {
             return await this.postComment(prNumber, fullBody);
         }
     }
+    /**
+     * Post a review comment on a specific line in a PR
+     */
+    async postReviewComment(prNumber, commit_id, path, line, body) {
+        const { data } = await this.octokit.rest.pulls.createReviewComment({
+            owner: this.owner,
+            repo: this.repo,
+            pull_number: prNumber,
+            commit_id,
+            body,
+            path,
+            line,
+        });
+        return data.id;
+    }
+    /**
+     * Post multiple review comments and return their IDs
+     */
+    async postReviewComments(prNumber, commit_id, comments) {
+        const results = [];
+        for (const comment of comments) {
+            try {
+                const id = await this.postReviewComment(prNumber, commit_id, comment.path, comment.line, comment.body);
+                results.push({ id, path: comment.path, line: comment.line });
+            }
+            catch (error) {
+                // Log error but continue with other comments
+                console.error(`Failed to post comment on ${comment.path}:${comment.line}`, error);
+            }
+        }
+        return results;
+    }
+    /**
+     * Get the HEAD commit SHA for a PR
+     */
+    async getPRHeadSha(prNumber) {
+        const { data: pr } = await this.octokit.rest.pulls.get({
+            owner: this.owner,
+            repo: this.repo,
+            pull_number: prNumber,
+        });
+        return pr.head.sha;
+    }
 }
 exports.GitHubClient = GitHubClient;
 /**
@@ -36438,6 +36688,7 @@ const labels_js_1 = __nccwpck_require__(4584);
 // Bot identifier for finding/updating our comments
 const BOT_IDENTIFIER_SIZE = 'ai-pr-helper:size-check';
 const BOT_IDENTIFIER_SUMMARY = 'ai-pr-helper:pr-summary';
+const BOT_IDENTIFIER_INDEX = 'ai-pr-helper:inline-index';
 const BOT_USERNAME = 'github-actions[bot]';
 /**
  * Load configuration from action inputs
@@ -36497,16 +36748,31 @@ async function handleReadyPR(github, claude, prNumber, config) {
         await github.upsertBotComment(prNumber, BOT_IDENTIFIER_SIZE, comment);
         core.warning(`PR #${prNumber} is ${estimate.totalLines} lines - recommended to split`);
     }
-    // Generate PR summary
-    core.info('Generating PR summary...');
-    const summary = await (0, analyzer_js_1.analyzePR)(pr, claude);
-    core.info(`Generated summary with ${summary.groups.length} groups`);
-    // Post summary comment
-    const summaryComment = (0, analyzer_js_1.formatSummaryComment)(summary, prNumber);
-    await github.upsertBotComment(prNumber, BOT_IDENTIFIER_SUMMARY, summaryComment);
-    // Store summary for interactive responses (in a real implementation, 
+    // Generate inline analysis
+    core.info('Generating inline review comments...');
+    const analysis = await (0, analyzer_js_1.analyzeInline)(pr, claude);
+    core.info(`Generated ${analysis.comments.length} inline comments`);
+    // Get HEAD commit SHA for posting review comments
+    const headSha = await github.getPRHeadSha(prNumber);
+    // Post inline comments
+    const commentResults = await github.postReviewComments(prNumber, headSha, analysis.comments.map((c) => ({
+        path: c.file,
+        line: c.line,
+        body: c.body,
+    })));
+    core.info(`Posted ${commentResults.length} review comments`);
+    // Create index comment with navigation
+    const commentLinks = analysis.comments.map((c) => ({
+        path: c.file,
+        line: c.line,
+        title: c.title,
+        severity: c.severity,
+    }));
+    const indexComment = (0, analyzer_js_1.formatIndexComment)(analysis, commentLinks);
+    await github.upsertBotComment(prNumber, BOT_IDENTIFIER_INDEX, indexComment);
+    // Store analysis for interactive responses (in a real implementation, 
     // this would be stored in a persistent way)
-    core.setOutput('summary', JSON.stringify(summary));
+    core.setOutput('analysis', JSON.stringify(analysis));
     core.info('Ready PR analysis complete');
 }
 /**

@@ -50,6 +50,26 @@ export declare class GitHubClient {
      * Find or create a specific bot comment (upsert pattern)
      */
     upsertBotComment(prNumber: number, botIdentifier: string, body: string): Promise<number>;
+    /**
+     * Post a review comment on a specific line in a PR
+     */
+    postReviewComment(prNumber: number, commit_id: string, path: string, line: number, body: string): Promise<number>;
+    /**
+     * Post multiple review comments and return their IDs
+     */
+    postReviewComments(prNumber: number, commit_id: string, comments: Array<{
+        path: string;
+        line: number;
+        body: string;
+    }>): Promise<Array<{
+        id: number;
+        path: string;
+        line: number;
+    }>>;
+    /**
+     * Get the HEAD commit SHA for a PR
+     */
+    getPRHeadSha(prNumber: number): Promise<string>;
 }
 /**
  * Parse action context from GitHub event

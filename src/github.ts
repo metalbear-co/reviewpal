@@ -227,6 +227,69 @@ export class GitHubClient {
       return await this.postComment(prNumber, fullBody);
     }
   }
+
+  /**
+   * Post a review comment on a specific line in a PR
+   */
+  async postReviewComment(
+    prNumber: number,
+    commit_id: string,
+    path: string,
+    line: number,
+    body: string
+  ): Promise<number> {
+    const { data } = await this.octokit.rest.pulls.createReviewComment({
+      owner: this.owner,
+      repo: this.repo,
+      pull_number: prNumber,
+      commit_id,
+      body,
+      path,
+      line,
+    });
+    return data.id;
+  }
+
+  /**
+   * Post multiple review comments and return their IDs
+   */
+  async postReviewComments(
+    prNumber: number,
+    commit_id: string,
+    comments: Array<{ path: string; line: number; body: string }>
+  ): Promise<Array<{ id: number; path: string; line: number }>> {
+    const results: Array<{ id: number; path: string; line: number }> = [];
+
+    for (const comment of comments) {
+      try {
+        const id = await this.postReviewComment(
+          prNumber,
+          commit_id,
+          comment.path,
+          comment.line,
+          comment.body
+        );
+        results.push({ id, path: comment.path, line: comment.line });
+      } catch (error) {
+        // Log error but continue with other comments
+        console.error(`Failed to post comment on ${comment.path}:${comment.line}`, error);
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Get the HEAD commit SHA for a PR
+   */
+  async getPRHeadSha(prNumber: number): Promise<string> {
+    const { data: pr } = await this.octokit.rest.pulls.get({
+      owner: this.owner,
+      repo: this.repo,
+      pull_number: prNumber,
+    });
+    return pr.head.sha;
+  }
 }
 
 /**

@@ -1,14 +1,31 @@
 /**
- * Intent Analyzer - Groups PR changes by intent and creates summaries
+ * Intent Analyzer - Analyzes PR changes and generates inline diff comments
  *
  * Feature 2: Smart PR Breakdown (Opus-Powered)
  */
-import type { PRData, PRSummary } from './types.js';
+import type { PRData, PRSummary, InlineAnalysis, Severity } from './types.js';
 import { ClaudeClient } from './anthropic.js';
 /**
- * Analyze PR and group changes by intent using Claude
+ * Get emoji for severity
+ */
+export declare function getEmojiForSeverity(severity: Severity): string;
+/**
+ * Analyze PR and generate inline comments using Claude
+ */
+export declare function analyzeInline(pr: PRData, claude: ClaudeClient): Promise<InlineAnalysis>;
+/**
+ * Analyze PR and group changes by intent using Claude (legacy format)
  */
 export declare function analyzePR(pr: PRData, claude: ClaudeClient): Promise<PRSummary>;
+/**
+ * Format index comment with navigation links to inline comments
+ */
+export declare function formatIndexComment(analysis: InlineAnalysis, commentLinks: Array<{
+    path: string;
+    line: number;
+    title: string;
+    severity: Severity;
+}>): string;
 /**
  * Format PR summary as a GitHub comment with clickable navigation
  */

@@ -110,59 +110,65 @@ Implements OAuth login with Google
 ...
 ```
 
-### Feature 2: Smart PR Breakdown
+### Feature 2: Inline Code Review
 
-When you mark a PR **Ready for review**, you get a navigable summary:
+When you mark a PR **Ready for review**, you get **inline diff comments** directly on the code:
+
+**Index comment (top-level navigation):**
 
 ```markdown
-## 📋 PR Summary (3 changes, ~8 min)
+## 📋 Quick Navigation
 
-### Quick Navigation
+Found 8 items for review (~6 min read)
 
-1. [**Authentication Flow**](#auth-flow) (lines 45-155)
-   - Adds OAuth login with Google
-   - Files: `auth.ts`, `login.tsx`, `api/oauth.ts`
+### 🔒 Security
+1. **Token exposure risk** → `src/auth.ts:45`
 
-2. [**Error Handling**](#error-handling) (lines 156-320)
-   - Wraps all API calls with retry logic
-   - Files: `api/client.ts`, `hooks/useQuery.ts`
+### 🐛 Bug
+2. **Null reference** → `src/api/user.ts:67`
+3. **Missing error handling** → `src/utils/fetch.ts:23`
 
-3. [**Loading States**](#loading-ui) (lines 321-480)
-   - Skeleton screens during data fetch
-   - Files: `components/Skeleton.tsx`, `pages/*.tsx`
+### ⚠️ Warning
+4. **Potential performance issue** → `src/components/UserList.tsx:102`
+5. **Deprecated API** → `src/hooks/useAuth.ts:34`
 
----
+### 🎨 Suggestion
+6. **Simplify with optional chaining** → `src/utils/format.ts:56`
 
-### Details
-
-<details id="auth-flow">
-<summary><strong>🔐 Authentication Flow</strong></summary>
-
-#### What
-Adds OAuth login with Google
-
-#### Why
-Replace deprecated session-based auth
-
-#### Flow
-```
-User clicks "Login with Google"
-  ↓
-OAuth redirect → /api/oauth/google
-  ↓
-Exchange code for tokens
-  ↓
-Store in httpOnly cookie ✓
-  ↓
-Redirect to /dashboard
+### 📖 Explanation
+7. **React Hook dependencies** → `src/components/Profile.tsx:89`
+8. **Why async/await here** → `src/api/client.ts:15`
 ```
 
-#### ⚠️ Watch out for
-- Token refresh happens in background (useEffect line 78)
-- Logout clears both cookie AND localStorage
+**Inline comments (on specific lines):**
 
-</details>
+Each comment appears directly on the relevant line in the diff:
+
+```markdown
+🔒 **Token exposure risk**
+
+**What:** JWT token is logged in plain text
+**Why:** Tokens in logs can be extracted by anyone with log access
+**Action:** Remove this console.log or redact the token value
 ```
+
+```markdown
+🐛 **Null reference**
+
+**What:** Accessing user.profile without null check
+**Why:** API can return user without profile field causing crash
+**Action:** Add optional chaining: user.profile?.name
+```
+
+**Severity System:**
+
+| Emoji | Severity | Use Case |
+|-------|----------|----------|
+| 📖 | explanation | Context/what this does |
+| ⚠️ | warning | Needs review, potential issue |
+| 🐛 | bug | Logic error, edge case |
+| 🔒 | security | Auth, XSS, injection risks |
+| 🎨 | suggestion | Optional improvement |
 
 ### Feature 3: Interactive Help
 

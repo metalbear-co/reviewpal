@@ -9,13 +9,14 @@ import type { Config, PRSummary } from './types.js';
 import { GitHubClient, parseActionContext } from './github.js';
 import { ClaudeClient } from './anthropic.js';
 import { estimateSize, suggestSplits, formatSizeComment } from './estimator.js';
-import { analyzePR, formatSummaryComment } from './analyzer.js';
+import { analyzePR, formatSummaryComment, analyzeInline, formatIndexComment } from './analyzer.js';
 import { processComment } from './responder.js';
 import { addSizeLabel } from './labels.js';
 
 // Bot identifier for finding/updating our comments
 const BOT_IDENTIFIER_SIZE = 'ai-pr-helper:size-check';
 const BOT_IDENTIFIER_SUMMARY = 'ai-pr-helper:pr-summary';
+const BOT_IDENTIFIER_INDEX = 'ai-pr-helper:inline-index';
 const BOT_USERNAME = 'github-actions[bot]';
 
 /**
@@ -100,18 +101,41 @@ async function handleReadyPR(
     core.warning(`PR #${prNumber} is ${estimate.totalLines} lines - recommended to split`);
   }
 
-  // Generate PR summary
-  core.info('Generating PR summary...');
-  const summary = await analyzePR(pr, claude);
-  core.info(`Generated summary with ${summary.groups.length} groups`);
+  // Generate inline analysis
+  core.info('Generating inline review comments...');
+  const analysis = await analyzeInline(pr, claude);
+  core.info(`Generated ${analysis.comments.length} inline comments`);
 
-  // Post summary comment
-  const summaryComment = formatSummaryComment(summary, prNumber);
-  await github.upsertBotComment(prNumber, BOT_IDENTIFIER_SUMMARY, summaryComment);
+  // Get HEAD commit SHA for posting review comments
+  const headSha = await github.getPRHeadSha(prNumber);
 
-  // Store summary for interactive responses (in a real implementation, 
+  // Post inline comments
+  const commentResults = await github.postReviewComments(
+    prNumber,
+    headSha,
+    analysis.comments.map((c) => ({
+      path: c.file,
+      line: c.line,
+      body: c.body,
+    }))
+  );
+
+  core.info(`Posted ${commentResults.length} review comments`);
+
+  // Create index comment with navigation
+  const commentLinks = analysis.comments.map((c) => ({
+    path: c.file,
+    line: c.line,
+    title: c.title,
+    severity: c.severity,
+  }));
+
+  const indexComment = formatIndexComment(analysis, commentLinks);
+  await github.upsertBotComment(prNumber, BOT_IDENTIFIER_INDEX, indexComment);
+
+  // Store analysis for interactive responses (in a real implementation, 
   // this would be stored in a persistent way)
-  core.setOutput('summary', JSON.stringify(summary));
+  core.setOutput('analysis', JSON.stringify(analysis));
 
   core.info('Ready PR analysis complete');
 }

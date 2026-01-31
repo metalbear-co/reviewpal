@@ -72,6 +72,27 @@ export interface PRSummary {
     estimatedReadTimeMinutes: number;
     groups: IntentGroup[];
 }
+/**
+ * Severity levels for inline comments
+ */
+export type Severity = 'explanation' | 'warning' | 'bug' | 'security' | 'suggestion';
+/**
+ * Inline comment for a specific line in the diff
+ */
+export interface InlineComment {
+    file: string;
+    line: number;
+    body: string;
+    severity: Severity;
+    title: string;
+}
+/**
+ * Analysis result with inline comments
+ */
+export interface InlineAnalysis {
+    comments: InlineComment[];
+    estimatedReadTimeMinutes: number;
+}
 export interface CommentContext {
     commentId: number;
     body: string;
