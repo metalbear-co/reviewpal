@@ -165,7 +165,7 @@ Guidelines:
     estimatedReadTimeMinutes: number;
   }>(systemPrompt, userPrompt, { maxTokens: 4096 });
 
-  // Format comments - keep inline simple since <details> doesn't work in review comments
+  // Format comments - one-liner for speed
   const comments: InlineComment[] = response.comments.map((c) => {
     const emoji = getEmojiForSeverity(c.severity);
     return {
@@ -173,11 +173,7 @@ Guidelines:
       line: c.line,
       title: c.title,
       severity: c.severity,
-      body: `${emoji} **${c.title}**
-
-**What:** ${c.what}  
-**Why:** ${c.why}  
-**Action:** ${c.action}`,
+      body: `${emoji} **${c.title}:** ${c.action}`,
     };
   });
 
@@ -312,34 +308,17 @@ Found ${commentLinks.length} items for review (~${analysis.estimatedReadTimeMinu
     const emoji = getEmojiForSeverity(severity);
     const severityLabel = severity.charAt(0).toUpperCase() + severity.slice(1);
     
-    // Make each section collapsible
-    const isExplanation = severity === 'explanation';
-    const defaultOpen = !isExplanation; // Explanations collapsed by default
-    
-    if (defaultOpen) {
-      // Critical sections: open by default
-      navigation += `<details open>\n<summary><strong>${emoji} ${severityLabel} (${items.length})</strong></summary>\n\n`;
-    } else {
-      // Explanations: collapsed by default
-      navigation += `<details>\n<summary><strong>${emoji} ${severityLabel} (${items.length})</strong></summary>\n\n`;
-    }
+    // Simple section header
+    navigation += `### ${emoji} ${severityLabel} (${items.length})\n\n`;
 
     for (const item of items) {
       const emoji = getEmojiForSeverity(item.severity);
-      // Make each finding collapsible with full details
-      const detailsOpen = '<details>';
-      const detailsClose = '</details>';
-      const summaryOpen = '<summary>';
-      const summaryClose = '</summary>';
-      
-      navigation += detailsOpen + '\n' + summaryOpen + index + '. ' + emoji + ' <strong>' + item.title + '</strong> → <code>' + item.path + ':' + item.line + '</code>' + summaryClose + '\n\n';
-      navigation += item.body + '\n\n';
-      navigation += '[View in diff →](' + item.path + '#L' + item.line + ')\n\n';
-      navigation += detailsClose + '\n\n';
+      // Simple clickable list - no duplication
+      navigation += `${index}. [${item.title}](../../blob/HEAD/${item.path}#L${item.line}) \`${item.path}:${item.line}\`\n`;
       index++;
     }
     
-    navigation += '</details>\n\n';
+    navigation += '\n';
   }
 
   const footer = `---
