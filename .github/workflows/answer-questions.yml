@@ -17,7 +17,7 @@ jobs:
     # Only answer if it's on a PR and has a question mark
     if: |
       (github.event.issue.pull_request != null || github.event.pull_request != null) && 
-      (contains(github.event.comment.body, '?') || contains(github.event.review_comment.body, '?'))
+      (contains(github.event.comment.body, '?') || contains(github.event.review_comment.body || '', '?'))
     
     steps:
       - name: Answer Question
@@ -84,6 +84,8 @@ jobs:
               question = context.payload.comment.body;
             }
             
+            console.log(`PR #${prNumber} | Question: ${question}`);
+            
             // Fetch PR details
             const { data: pr } = await github.rest.pulls.get({
               owner: context.repo.owner,
@@ -91,12 +93,17 @@ jobs:
               pull_number: prNumber
             });
             
+            console.log(`PR Title: ${pr.title}`);
+            
             // Fetch PR files
             const { data: files } = await github.rest.pulls.listFiles({
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: prNumber
             });
+            
+            console.log(`Files changed: ${files.length}`);
+            files.forEach(f => console.log(`  - ${f.filename} (${f.status}) - patch length: ${f.patch?.length || 0}`));
             
             // Build file context (limit to first 5 files to avoid token limits)
             let fileContext = files.slice(0, 5).map(file => {
@@ -119,8 +126,15 @@ ${isLineComment ? lineContext : ''}Question: ${question}
 
 Answer in 2-4 sentences. Be specific about the code. Reference file names and line numbers when relevant.`;
 
+            console.log(`Prompt length: ${prompt.length} characters`);
+            console.log('--- FULL PROMPT ---');
+            console.log(prompt);
+            console.log('--- END PROMPT ---');
+
             try {
               const answer = await callAnthropic(prompt, process.env.ANTHROPIC_API_KEY);
+              
+              console.log(`Got answer: ${answer.substring(0, 100)}...`);
               
               // Reply to the comment
               if (context.eventName === 'pull_request_review_comment') {
@@ -141,4 +155,5 @@ Answer in 2-4 sentences. Be specific about the code. Reference file names and li
               }
             } catch (error) {
               console.error('Failed:', error.message);
+              console.error(error.stack);
             }
