@@ -78,12 +78,8 @@ export interface ComplexityFlag {
 
 // AI Review
 export interface AIReview {
-  summary: string;
-  issues: Array<{
-    severity: 'high' | 'medium' | 'low';
-    issue: string;
-    suggestion: string;
-  }>;
+  explanation: string;  // Human-friendly explanation of what this does
+  concerns: string[];   // List of concerns written naturally
   language: string;
 }
 

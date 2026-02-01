@@ -56,12 +56,8 @@ export interface ComplexityFlag {
     severity: 'warning' | 'critical';
 }
 export interface AIReview {
-    summary: string;
-    issues: Array<{
-        severity: 'high' | 'medium' | 'low';
-        issue: string;
-        suggestion: string;
-    }>;
+    explanation: string;
+    concerns: string[];
     language: string;
 }
 export interface HunkAnalysis {

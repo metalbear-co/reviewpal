@@ -21,7 +21,7 @@ const diff_js_1 = require("./parsers/diff.js");
 const claude_js_1 = require("./api/claude.js");
 const friendly_js_1 = require("./formatters/friendly.js");
 const types_js_1 = require("./types.js");
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 async function main() {
     const program = new commander_1.Command();
     program

@@ -33,34 +33,33 @@ function getClient() {
  * Review code with AI (language agnostic)
  */
 async function reviewCode(code, filename, model = 'claude-sonnet-4-20250514') {
-    const prompt = `You are an expert code reviewer. Review this code change from ${filename}.
+    const prompt = `You're a friendly senior developer doing a code review. A teammate just opened a PR with this code change in ${filename}.
+
+Review it like you're talking to them in person - casual, helpful, specific.
 
 CODE:
 \`\`\`
 ${code.slice(0, 4000)}
 \`\`\`
 
-Analyze for:
-1. **Language Detection** - Determine the programming language
-2. **Code Quality Issues** - Any problems, anti-patterns, or concerns
-3. **AI-Generated Patterns** - Signs this may be AI-generated (over-defensive, verbose, over-abstracted)
-4. **Improvement Suggestions** - Actionable fixes
+Write a review that:
+1. Explains what this code does (like you're telling a friend)
+2. Points out specific issues you notice (be direct but nice)
+3. For each issue, say WHERE it is and HOW to fix it
 
-Respond in JSON format only:
+Respond in JSON:
 {
-  "language": "detected programming language",
-  "summary": "1-2 sentence overview of what changed",
-  "issues": [
-    {
-      "severity": "high|medium|low",
-      "issue": "What's wrong (be specific)",
-      "suggestion": "How to fix it (actionable)"
-    }
+  "language": "programming language",
+  "explanation": "2-3 sentences explaining what this PR does, written conversationally",
+  "concerns": [
+    "Natural sentence pointing out an issue, like: 'Hey, on line 23 you're calling fetch without error handling - if the network fails this will crash. Wrap it in try-catch or add .catch()'",
+    "Another concern in natural language..."
   ]
 }
 
-Only report real issues. If the code looks good, return empty issues array.
-Be specific and helpful, not generic or vague.`;
+Only mention real issues. If the code is solid, make concerns an empty array and say so in explanation.
+Be specific about line numbers/locations when you can see them.
+Write like a human, not a report.`;
     const response = await getClient().messages.create({
         model,
         max_tokens: 1500,
@@ -75,8 +74,8 @@ Be specific and helpful, not generic or vague.`;
         const parsed = JSON.parse(jsonMatch[0]);
         return {
             language: parsed.language || 'Unknown',
-            summary: parsed.summary || 'Code changes detected',
-            issues: Array.isArray(parsed.issues) ? parsed.issues : []
+            explanation: parsed.explanation || 'Code changes detected',
+            concerns: Array.isArray(parsed.concerns) ? parsed.concerns : []
         };
     }
     catch (e) {
@@ -87,8 +86,8 @@ Be specific and helpful, not generic or vague.`;
 function defaultReview() {
     return {
         language: 'Unknown',
-        summary: 'Unable to analyze code',
-        issues: []
+        explanation: 'Unable to analyze code - might be a parsing issue.',
+        concerns: []
     };
 }
 //# sourceMappingURL=claude.js.map

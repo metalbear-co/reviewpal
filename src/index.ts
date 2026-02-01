@@ -27,7 +27,7 @@ import {
   DEFAULT_CONFIG
 } from './types.js';
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 
 async function main() {
   const program = new Command();
