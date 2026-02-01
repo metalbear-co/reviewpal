@@ -94,9 +94,10 @@ runs:
       run: |
         cd ${{ github.action_path }}
         
-        # Run analysis
+        # Run analysis (quiet mode to hide spinner)
         node dist/index.js ${{ steps.diff.outputs.diff_file }} \
           --format ${{ inputs.format }} \
+          --quiet \
           --max-hunks ${{ inputs.max_hunks }} \
           --model ${{ inputs.model }} > /tmp/analysis.md 2>&1 || true
         

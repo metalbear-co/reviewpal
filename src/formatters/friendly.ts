@@ -31,7 +31,7 @@ export function formatFriendlyReviewResult(result: ReviewResult): string {
       
       // Summary (brief!)
       if (!hasCriticalIssues) {
-        parts.push(`**What's this?** ${summary}\n`);
+        parts.push(`**What does this PR do?** ${summary}\n`);
         if (language && language !== 'Unknown') {
           parts.push(`*${language}*\n`);
         }

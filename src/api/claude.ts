@@ -45,30 +45,25 @@ export async function reviewCode(
   filename: string,
   model: string = 'claude-sonnet-4-20250514'
 ): Promise<AIReview> {
-  const prompt = `You're reviewing a PR. Be BRIEF and only flag CRITICAL issues.
+  const prompt = `You're a friendly code reviewer helping a teammate. Review this PR kindly.
 
 CODE (${filename}):
 \`\`\`
 ${code.slice(0, 4000)}
 \`\`\`
 
-ONLY report issues that:
-- 🔒 Security vulnerabilities (exposed secrets, SQL injection, XSS, etc.)
-- 💥 Will crash in production (unhandled errors, null refs, race conditions)
-- 🗑️ Data loss risks (missing validation, destructive ops without confirmation)
+ONLY report CRITICAL issues that could break production:
+- 🔒 Security vulnerabilities (exposed secrets, SQL injection, XSS)
+- 💥 Will crash (unhandled errors, null refs, race conditions)
+- 🗑️ Data loss risks (missing validation, destructive ops)
 - 🐌 Major performance problems (N+1 queries, infinite loops, memory leaks)
 
-Ignore:
-- Style issues
-- Minor optimizations
-- Naming conventions
-- Comments
-- Anything that won't break prod
+Ignore: style, minor optimizations, naming, comments, anything non-critical.
 
 Respond in JSON:
 {
   "language": "language name",
-  "summary": "1 sentence: what does this PR do?",
+  "summary": "Politely explain what this PR does in 1-3 sentences. Be kind and conversational, like you're talking to a friend. Under 6 sentences total.",
   "critical": [
     {
       "type": "security|crash|data-loss|performance",
@@ -78,7 +73,7 @@ Respond in JSON:
   ]
 }
 
-If no CRITICAL issues, return empty critical array.`;
+Be encouraging and helpful in your summary. If no CRITICAL issues, return empty critical array.`;
 
   const response = await getClient().messages.create({
     model,
