@@ -1,5 +1,8 @@
 # 🔍 ReviewPal
 
+[![npm version](https://img.shields.io/npm/v/reviewpal.svg)](https://www.npmjs.com/package/reviewpal)
+[![npm downloads](https://img.shields.io/npm/dm/reviewpal.svg)](https://www.npmjs.com/package/reviewpal)
+
 **AI-powered code review for any language.**
 
 > Let Claude review your code changes and catch issues before your teammates do.
