@@ -120,7 +120,8 @@ runs:
       with:
         github-token: ${{ inputs.github_token }}
         script: |
-          const analysis = `${{ steps.analyze.outputs.analysis_markdown }}`;
+          const fs = require('fs');
+          const analysis = fs.readFileSync('/tmp/analysis.md', 'utf8');
           const marker = '<!-- reviewpal -->';
           
           // Skip if no meaningful content
