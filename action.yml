@@ -206,14 +206,29 @@ runs:
             });
           }
           
-          let summary = '**ReviewPal found critical issues:**\n\n';
+          // Get PR summary from first file's first hunk
+          let prSummary = '';
+          if (analysisJson.files && analysisJson.files[0] && 
+              analysisJson.files[0].hunks && analysisJson.files[0].hunks[0] &&
+              analysisJson.files[0].hunks[0].aiReview) {
+            prSummary = analysisJson.files[0].hunks[0].aiReview.summary || '';
+          }
+          
+          let summary = '';
+          
+          // Add friendly PR explanation
+          if (prSummary) {
+            summary += `**What is this PR about:** ${prSummary}\n\n`;
+          }
+          
+          summary += '**Here are some suggestions:**\n\n';
           for (const [type, items] of Object.entries(issuesByType)) {
             const emoji = EMOJI_MAP[type] || '⚠️';
             const links = items.map(i => `[${i.num}](${i.url})`).join(' ');
             summary += `${emoji} **${items.length} ${type.toUpperCase()}**: ${links}\n`;
           }
           
-          summary += '\n*Click the numbers to jump to inline comments.*';
+          summary += '\n*Click the numbers to jump to inline suggestions.*';
           
           // Post or update summary comment
           const marker = '<!-- reviewpal -->';
