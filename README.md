@@ -6,6 +6,8 @@
 
 ## ⏱️ Installation (Step-by-Step)
 
+> 📖 **Detailed Guide:** See [INSTALL.md](INSTALL.md) for a complete installation guide with troubleshooting.
+
 ### Step 1: Get Your Anthropic API Key
 
 1. Go to https://console.anthropic.com
