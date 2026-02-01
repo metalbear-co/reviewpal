@@ -158,11 +158,13 @@ runs:
             return;
           }
           
-          // Post inline comments on each line
+          // Post inline comments on each line and capture comment IDs
           const headSha = context.payload.pull_request.head.sha;
+          const commentLinks = [];
+          
           for (const item of allIssues) {
             try {
-              await github.rest.pulls.createReviewComment({
+              const comment = await github.rest.pulls.createReviewComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 pull_number: context.issue.number,
@@ -172,29 +174,46 @@ runs:
                 line: item.line,
                 side: 'RIGHT'
               });
+              
+              // Save comment link for summary
+              commentLinks.push({
+                type: item.type,
+                url: comment.data.html_url,
+                file: item.file,
+                line: item.line
+              });
             } catch (e) {
               console.log(`Failed to comment on ${item.file}:${item.line}:`, e.message);
             }
           }
           
-          // Build summary comment with links
-          const repo = context.repo.owner + '/' + context.repo.repo;
-          const prNumber = context.issue.number;
+          if (commentLinks.length === 0) {
+            console.log('No comments posted');
+            return;
+          }
           
+          // Build summary with numbered links to comments
           const issuesByType = {};
-          for (const item of allIssues) {
+          let counter = 1;
+          
+          for (const item of commentLinks) {
             if (!issuesByType[item.type]) issuesByType[item.type] = [];
-            const link = `https://github.com/${repo}/pull/${prNumber}/files#diff-${item.diffHash}R${item.line}`;
-            issuesByType[item.type].push(`[${item.file}:${item.line}](${link})`);
+            issuesByType[item.type].push({
+              num: counter++,
+              url: item.url,
+              file: item.file,
+              line: item.line
+            });
           }
           
           let summary = '**ReviewPal found critical issues:**\n\n';
-          for (const [type, links] of Object.entries(issuesByType)) {
+          for (const [type, items] of Object.entries(issuesByType)) {
             const emoji = EMOJI_MAP[type] || '⚠️';
-            summary += `${emoji} **${links.length} ${type.toUpperCase()} issue${links.length > 1 ? 's' : ''}**: ${links.join(', ')}\n`;
+            const links = items.map(i => `[${i.num}](${i.url})`).join(' ');
+            summary += `${emoji} **${items.length} ${type.toUpperCase()}**: ${links}\n`;
           }
           
-          summary += '\n*Click the links to see inline suggestions on each line.*';
+          summary += '\n*Click the numbers to jump to inline comments.*';
           
           // Post or update summary comment
           const marker = '<!-- reviewpal -->';
