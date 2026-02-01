@@ -223,37 +223,21 @@ runs:
           if (prSummary) {
             summary += `## 📋 What is this PR about\n\n`;
             summary += `${prSummary}\n\n`;
+            summary += `---\n\n`;
           }
-          
-          // Determine risk level based on issue types and counts
-          let riskLevel = 'Low';
-          let riskEmoji = '🟢';
-          let totalIssues = 0;
-          let hasSecurityIssues = false;
-          let hasCrashIssues = false;
-          
-          for (const [type, items] of Object.entries(issuesByType)) {
-            totalIssues += items.length;
-            if (type === 'security') hasSecurityIssues = true;
-            if (type === 'crash' || type === 'data-loss') hasCrashIssues = true;
-          }
-          
-          if (hasSecurityIssues || hasCrashIssues || totalIssues >= 3) {
-            riskLevel = 'High';
-            riskEmoji = '🔴';
-          } else if (totalIssues >= 1) {
-            riskLevel = 'Medium';
-            riskEmoji = '🟡';
-          }
-          
-          summary += `### ${riskEmoji} Risk Level: **${riskLevel}**\n\n`;
-          summary += `---\n\n`;
           
           summary += `## 💡 Suggestions\n\n`;
           summary += `| Category | Count | Details |\n`;
           summary += `|----------|-------|----------|\n`;
           
-          for (const [type, items] of Object.entries(issuesByType)) {
+          // Sort by severity: security > crash > data-loss > performance
+          const severityOrder = ['security', 'crash', 'data-loss', 'performance'];
+          const sortedTypes = Object.keys(issuesByType).sort((a, b) => {
+            return severityOrder.indexOf(a) - severityOrder.indexOf(b);
+          });
+          
+          for (const type of sortedTypes) {
+            const items = issuesByType[type];
             const emoji = EMOJI_MAP[type] || '⚠️';
             const links = items.map(i => `[${i.num}](${i.url})`).join(' ');
             const typeLabel = type.toUpperCase().replace('-', ' ');
