@@ -7,6 +7,15 @@
 
 > Let Claude review your code changes and catch issues before your teammates do.
 
+## ✨ New: Interactive Replies
+
+ReviewPal now responds to your questions! Reply to any ReviewPal comment and it will answer your follow-up questions using Claude.
+
+```
+You: "Can you explain what you mean by this?"
+ReviewPal: "Sure! The issue is that... [detailed explanation]"
+```
+
 ## ⏱️ Installation (Step-by-Step)
 
 > 📖 **Detailed Guide:** See [INSTALL.md](INSTALL.md) for a complete installation guide with troubleshooting.
@@ -50,7 +59,7 @@ mkdir -p .github/workflows
 
 # Download ReviewPal workflow
 curl -o .github/workflows/reviewpal.yml \
-  https://raw.githubusercontent.com/Arephan/reviewpal/main/examples/github-action-workflow.yml
+  https://raw.githubusercontent.com/metalbear-co/reviewpal/main/examples/github-action-workflow.yml
 
 # Commit and push
 git add .github/workflows/reviewpal.yml
@@ -69,10 +78,16 @@ name: ReviewPal
 on:
   pull_request:
     types: [opened, synchronize]
+  # Enable interactive replies
+  pull_request_review_comment:
+    types: [created]
+  issue_comment:
+    types: [created]
 
 jobs:
   review:
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     permissions:
       contents: read
       pull-requests: write
@@ -80,8 +95,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
-      - uses: Arephan/reviewpal@v1
+      - uses: metalbear-co/reviewpal@v2
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  reply:
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'pull_request_review_comment' ||
+       github.event_name == 'issue_comment') &&
+      github.event.comment.user.login != 'github-actions[bot]'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: metalbear-co/reviewpal/reply@v2
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -105,7 +134,7 @@ jobs:
 
 ReviewPal will now automatically review every PR in your repo.
 
-**Need help?** [Open an issue](https://github.com/Arephan/reviewpal/issues)
+**Need help?** [Open an issue](https://github.com/metalbear-co/reviewpal/issues)
 
 ---
 
@@ -160,10 +189,16 @@ name: ReviewPal
 on:
   pull_request:
     types: [opened, synchronize]
+  # Enable interactive replies
+  pull_request_review_comment:
+    types: [created]
+  issue_comment:
+    types: [created]
 
 jobs:
   review:
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     permissions:
       contents: read
       pull-requests: write
@@ -171,9 +206,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
-      - name: ReviewPal
-        uses: Arephan/reviewpal@v1
+      - uses: metalbear-co/reviewpal@v2
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  # Optional: Enable interactive replies
+  reply:
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'pull_request_review_comment' ||
+       github.event_name == 'issue_comment') &&
+      github.event.comment.user.login != 'github-actions[bot]'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: metalbear-co/reviewpal/reply@v2
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -316,15 +365,15 @@ This means the API key is missing or invalid.
 
 ### How do I update to the latest version?
 
-Just change `@v1` to `@v1.1.0` (or latest) in your workflow file:
+Just change `@v2` to `@v2.1.0` (or latest) in your workflow file:
 
 ```yaml
-- uses: Arephan/reviewpal@v1.1.0  # specific version
+- uses: metalbear-co/reviewpal@v2.1.0  # specific version
 # or
-- uses: Arephan/reviewpal@v1      # auto-updates to latest v1.x
+- uses: metalbear-co/reviewpal@v2      # auto-updates to latest v1.x
 ```
 
-**Recommendation:** Use `@v1` to get automatic updates.
+**Recommendation:** Use `@v2` to get automatic updates.
 
 ---
 
@@ -332,7 +381,7 @@ Just change `@v1` to `@v1.1.0` (or latest) in your workflow file:
 
 ```bash
 # Clone
-git clone https://github.com/Arephan/reviewpal
+git clone https://github.com/metalbear-co/reviewpal
 cd reviewpal
 
 # Install

@@ -109,3 +109,39 @@ function defaultReview(): AIReview {
     critical: []
   };
 }
+
+/**
+ * Reply to a user's question about a code review comment
+ */
+export async function replyToComment(
+  question: string,
+  originalComment: string,
+  codeContext: string,
+  model: string = 'claude-sonnet-4-20250514'
+): Promise<string> {
+  const prompt = `You are ReviewPal, an AI code review assistant. A user is asking a follow-up question about your previous code review comment.
+
+YOUR ORIGINAL COMMENT:
+${originalComment}
+
+CODE CONTEXT:
+\`\`\`
+${codeContext.slice(0, 3000)}
+\`\`\`
+
+USER'S QUESTION:
+${question}
+
+Provide a helpful, concise response to their question. Be friendly and educational. If they're asking for clarification, explain in more detail. If they're disagreeing, consider their point fairly. If they're asking how to fix something, provide a specific code example if appropriate.
+
+Keep your response under 500 words. Use markdown formatting for code snippets.`;
+
+  const response = await getClient().messages.create({
+    model,
+    max_tokens: 1000,
+    messages: [{ role: 'user', content: prompt }]
+  });
+
+  const text = response.content[0].type === 'text' ? response.content[0].text : '';
+  return text || 'I apologize, but I was unable to generate a response. Please try rephrasing your question.';
+}

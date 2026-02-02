@@ -1,0 +1,225 @@
+name: 'ReviewPal Reply'
+description: 'Respond to questions on ReviewPal comments'
+author: 'MetalBear'
+
+branding:
+  icon: 'message-circle'
+  color: 'purple'
+
+inputs:
+  anthropic_api_key:
+    description: 'Anthropic API key for Claude analysis (REQUIRED)'
+    required: true
+  github_token:
+    description: 'GitHub token for posting comments (defaults to GITHUB_TOKEN)'
+    required: false
+    default: ${{ github.token }}
+  model:
+    description: 'Claude model to use'
+    required: false
+    default: 'claude-sonnet-4-20250514'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check if this is a reply to ReviewPal
+      id: check
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github_token }}
+        script: |
+          const comment = context.payload.comment;
+
+          // Skip if this is our own comment
+          if (comment.user.login === 'github-actions[bot]') {
+            console.log('Skipping - this is our own comment');
+            return;
+          }
+
+          // Check if this is a reply to a review comment (inline comment)
+          if (context.payload.action === 'created' && comment.in_reply_to_id) {
+            // Get the parent comment
+            try {
+              const { data: parentComment } = await github.rest.pulls.getReviewComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: comment.in_reply_to_id
+              });
+
+              // Check if parent is from ReviewPal
+              if (parentComment.user.login === 'github-actions[bot]' &&
+                  (parentComment.body.includes('**SECURITY**') ||
+                   parentComment.body.includes('**CRASH**') ||
+                   parentComment.body.includes('**DATA-LOSS**') ||
+                   parentComment.body.includes('**PERFORMANCE**'))) {
+                console.log('This is a reply to a ReviewPal comment!');
+                core.setOutput('is_reviewpal_reply', 'true');
+                core.setOutput('parent_comment_body', parentComment.body);
+                core.setOutput('parent_comment_path', parentComment.path);
+                core.setOutput('parent_comment_line', parentComment.line || parentComment.original_line);
+                core.setOutput('user_question', comment.body);
+                core.setOutput('comment_id', comment.id);
+                core.setOutput('pull_number', context.payload.pull_request.number);
+                return;
+              }
+            } catch (e) {
+              console.log('Error fetching parent comment:', e.message);
+            }
+          }
+
+          // Check if this is a reply to a PR comment (issue comment)
+          if (context.eventName === 'issue_comment') {
+            const body = comment.body || '';
+
+            // Check if the comment mentions reviewpal or is replying to the summary
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            // Find ReviewPal's summary comment
+            const reviewpalComment = comments.find(c =>
+              c.user.login === 'github-actions[bot]' &&
+              c.body && c.body.includes('<!-- reviewpal -->')
+            );
+
+            if (reviewpalComment) {
+              // Check if user's comment mentions @reviewpal or quotes the bot
+              if (body.toLowerCase().includes('@reviewpal') ||
+                  body.toLowerCase().includes('reviewpal')) {
+                console.log('User is asking ReviewPal a question!');
+                core.setOutput('is_reviewpal_reply', 'true');
+                core.setOutput('parent_comment_body', reviewpalComment.body);
+                core.setOutput('user_question', comment.body);
+                core.setOutput('comment_id', comment.id);
+                core.setOutput('pull_number', context.issue.number);
+                return;
+              }
+            }
+          }
+
+          console.log('Not a ReviewPal reply, skipping');
+          core.setOutput('is_reviewpal_reply', 'false');
+
+    - name: Setup Node.js
+      if: steps.check.outputs.is_reviewpal_reply == 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install dependencies
+      if: steps.check.outputs.is_reviewpal_reply == 'true'
+      shell: bash
+      run: |
+        cd ${{ github.action_path }}
+        npm ci --production
+
+    - name: Build
+      if: steps.check.outputs.is_reviewpal_reply == 'true'
+      shell: bash
+      run: |
+        cd ${{ github.action_path }}
+        npm run build
+
+    - name: Get code context
+      if: steps.check.outputs.is_reviewpal_reply == 'true'
+      id: context
+      shell: bash
+      run: |
+        # Try to get file context if we have path info
+        if [ -n "${{ steps.check.outputs.parent_comment_path }}" ]; then
+          FILE_PATH="${{ steps.check.outputs.parent_comment_path }}"
+          if [ -f "$FILE_PATH" ]; then
+            # Get surrounding lines
+            LINE=${{ steps.check.outputs.parent_comment_line }}
+            START=$((LINE - 10))
+            [ $START -lt 1 ] && START=1
+            END=$((LINE + 10))
+            CODE=$(sed -n "${START},${END}p" "$FILE_PATH" 2>/dev/null || echo "")
+            echo "code<<EOF" >> $GITHUB_OUTPUT
+            echo "$CODE" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "code=" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "code=" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Generate and post reply
+      if: steps.check.outputs.is_reviewpal_reply == 'true'
+      uses: actions/github-script@v7
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+        MODEL: ${{ inputs.model }}
+        PARENT_COMMENT: ${{ steps.check.outputs.parent_comment_body }}
+        USER_QUESTION: ${{ steps.check.outputs.user_question }}
+        CODE_CONTEXT: ${{ steps.context.outputs.code }}
+      with:
+        github-token: ${{ inputs.github_token }}
+        script: |
+          const Anthropic = require('@anthropic-ai/sdk').default;
+
+          const client = new Anthropic({
+            apiKey: process.env.ANTHROPIC_API_KEY
+          });
+
+          const parentComment = process.env.PARENT_COMMENT || '';
+          const userQuestion = process.env.USER_QUESTION || '';
+          const codeContext = process.env.CODE_CONTEXT || '';
+          const model = process.env.MODEL || 'claude-sonnet-4-20250514';
+
+          const prompt = `You are ReviewPal, an AI code review assistant. A user is asking a follow-up question about your previous code review comment.
+
+          YOUR ORIGINAL COMMENT:
+          ${parentComment}
+
+          ${codeContext ? `CODE CONTEXT:\n\`\`\`\n${codeContext}\n\`\`\`` : ''}
+
+          USER'S QUESTION:
+          ${userQuestion}
+
+          Provide a helpful, concise response to their question. Be friendly and educational. If they're asking for clarification, explain in more detail. If they're disagreeing, consider their point fairly and acknowledge if they make a good point. If they're asking how to fix something, provide a specific code example if appropriate.
+
+          Keep your response under 300 words. Use markdown formatting for code snippets.`;
+
+          try {
+            const response = await client.messages.create({
+              model,
+              max_tokens: 800,
+              messages: [{ role: 'user', content: prompt }]
+            });
+
+            const reply = response.content[0].type === 'text'
+              ? response.content[0].text
+              : 'I apologize, but I was unable to generate a response.';
+
+            // Post the reply
+            const pullNumber = ${{ steps.check.outputs.pull_number }};
+            const commentId = ${{ steps.check.outputs.comment_id }};
+
+            // Try to reply to review comment first
+            try {
+              await github.rest.pulls.createReplyForReviewComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pullNumber,
+                comment_id: commentId,
+                body: reply
+              });
+              console.log('Posted reply to review comment');
+            } catch (e) {
+              // Fall back to issue comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pullNumber,
+                body: reply
+              });
+              console.log('Posted reply as issue comment');
+            }
+          } catch (e) {
+            console.error('Error generating reply:', e.message);
+            core.setFailed(`Failed to generate reply: ${e.message}`);
+          }
