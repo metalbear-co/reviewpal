@@ -1,66 +1,71 @@
 # ReviewPal - GitHub Action Workflow
 # Drop this file into .github/workflows/ to enable AI-powered code reviews
+# with interactive comment replies!
 #
-# Works out of the box with zero configuration!
-# Add ANTHROPIC_API_KEY secret for AI-powered summaries (optional).
+# Features:
+# - Automatic PR review on open/sync
+# - Reply to user questions on ReviewPal comments
+#
+# Required: Add ANTHROPIC_API_KEY secret to your repository
 
-name: ReviewPal Code Review
+name: ReviewPal
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    # Only run on code files
-    paths:
-      - '**.ts'
-      - '**.tsx'
-      - '**.js'
-      - '**.jsx'
+
+  # Enable replies to ReviewPal comments
+  pull_request_review_comment:
+    types: [created]
+
+  issue_comment:
+    types: [created]
 
 # Cancel in-progress runs on the same PR
 concurrency:
-  group: ai-review-${{ github.event.pull_request.number }}
+  group: reviewpal-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: true
 
 jobs:
+  # Job 1: Review PRs on open/sync
   review:
     runs-on: ubuntu-latest
-    # Don't run on draft PRs
-    if: github.event.pull_request.draft == false
-    
+    if: github.event_name == 'pull_request'
+
     permissions:
       contents: read
       pull-requests: write
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for diff
-      
-      - name: ReviewPal
-        uses: Arephan/reviewpal@v1
-        with:
-          # Optional: Add ANTHROPIC_API_KEY secret for AI summaries
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          
-          # Configuration (all optional)
-          max_hunks: '20'           # Limit for large PRs
-          comment_on_pr: 'true'     # Post as PR comment
-          # inline_comments: 'true' # Also post inline (experimental)
-          
-          # Strictness
-          fail_on_high_complexity: 'false'  # Set 'true' to block merges
+          fetch-depth: 0
 
-      # Optional: Post summary as job annotation
-      - name: Summary
-        if: always()
-        run: |
-          echo "### ReviewPal Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ steps.ai-review.outputs.total_files }}" = "0" ]; then
-            echo "✅ No TypeScript/JavaScript files changed" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- Files: ${{ steps.ai-review.outputs.total_files }}" >> $GITHUB_STEP_SUMMARY
-            echo "- Hunks: ${{ steps.ai-review.outputs.total_hunks }}" >> $GITHUB_STEP_SUMMARY
-            echo "- AI Likelihood: ${{ steps.ai-review.outputs.ai_likelihood }}" >> $GITHUB_STEP_SUMMARY
-          fi
+      - name: ReviewPal Review
+        uses: metalbear-co/reviewpal@v2
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          max_hunks: '20'
+          comment_on_pr: 'true'
+
+  # Job 2: Reply to comments on ReviewPal's review comments
+  reply:
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'pull_request_review_comment' ||
+       github.event_name == 'issue_comment') &&
+      github.event.comment.user.login != 'github-actions[bot]'
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: ReviewPal Reply
+        uses: metalbear-co/reviewpal/reply@v2
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
