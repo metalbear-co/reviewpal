@@ -147,79 +147,83 @@ runs:
           echo "code=" >> $GITHUB_OUTPUT
         fi
 
-    - name: Generate and post reply
+    - name: Generate reply with Claude
       if: steps.check.outputs.is_reviewpal_reply == 'true'
-      uses: actions/github-script@v7
+      id: claude
+      shell: bash
       env:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
         MODEL: ${{ inputs.model }}
         PARENT_COMMENT: ${{ steps.check.outputs.parent_comment_body }}
         USER_QUESTION: ${{ steps.check.outputs.user_question }}
         CODE_CONTEXT: ${{ steps.context.outputs.code }}
+      run: |
+        # Build the prompt
+        PROMPT="You are ReviewPal, an AI code review assistant. A user is asking a follow-up question about your previous code review comment.
+
+        YOUR ORIGINAL COMMENT:
+        ${PARENT_COMMENT}
+
+        ${CODE_CONTEXT:+CODE CONTEXT:
+        \`\`\`
+        ${CODE_CONTEXT}
+        \`\`\`}
+
+        USER'S QUESTION:
+        ${USER_QUESTION}
+
+        Provide a helpful, concise response to their question. Be friendly and educational. If they're asking for clarification, explain in more detail. If they're disagreeing, consider their point fairly and acknowledge if they make a good point. If they're asking how to fix something, provide a specific code example if appropriate.
+
+        Keep your response under 300 words. Use markdown formatting for code snippets."
+
+        # Call Claude API
+        RESPONSE=$(curl -s https://api.anthropic.com/v1/messages \
+          -H "Content-Type: application/json" \
+          -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+          -H "anthropic-version: 2023-06-01" \
+          -d "$(jq -n \
+            --arg model "${MODEL:-claude-sonnet-4-20250514}" \
+            --arg prompt "$PROMPT" \
+            '{model: $model, max_tokens: 800, messages: [{role: "user", content: $prompt}]}')")
+
+        # Extract the reply text
+        REPLY=$(echo "$RESPONSE" | jq -r '.content[0].text // "I apologize, but I was unable to generate a response."')
+
+        # Save to output (handle multiline)
+        echo "reply<<EOF" >> $GITHUB_OUTPUT
+        echo "$REPLY" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Post reply
+      if: steps.check.outputs.is_reviewpal_reply == 'true'
+      uses: actions/github-script@v7
+      env:
+        REPLY_TEXT: ${{ steps.claude.outputs.reply }}
       with:
         github-token: ${{ inputs.github_token }}
         script: |
-          const Anthropic = require('@anthropic-ai/sdk').default;
+          const reply = process.env.REPLY_TEXT || 'I apologize, but I was unable to generate a response.';
+          const pullNumber = ${{ steps.check.outputs.pull_number }};
+          const commentId = ${{ steps.check.outputs.comment_id }};
 
-          const client = new Anthropic({
-            apiKey: process.env.ANTHROPIC_API_KEY
-          });
-
-          const parentComment = process.env.PARENT_COMMENT || '';
-          const userQuestion = process.env.USER_QUESTION || '';
-          const codeContext = process.env.CODE_CONTEXT || '';
-          const model = process.env.MODEL || 'claude-sonnet-4-20250514';
-
-          const prompt = `You are ReviewPal, an AI code review assistant. A user is asking a follow-up question about your previous code review comment.
-
-          YOUR ORIGINAL COMMENT:
-          ${parentComment}
-
-          ${codeContext ? `CODE CONTEXT:\n\`\`\`\n${codeContext}\n\`\`\`` : ''}
-
-          USER'S QUESTION:
-          ${userQuestion}
-
-          Provide a helpful, concise response to their question. Be friendly and educational. If they're asking for clarification, explain in more detail. If they're disagreeing, consider their point fairly and acknowledge if they make a good point. If they're asking how to fix something, provide a specific code example if appropriate.
-
-          Keep your response under 300 words. Use markdown formatting for code snippets.`;
-
+          // Try to reply to review comment first
           try {
-            const response = await client.messages.create({
-              model,
-              max_tokens: 800,
-              messages: [{ role: 'user', content: prompt }]
+            await github.rest.pulls.createReplyForReviewComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pullNumber,
+              comment_id: commentId,
+              body: reply
             });
-
-            const reply = response.content[0].type === 'text'
-              ? response.content[0].text
-              : 'I apologize, but I was unable to generate a response.';
-
-            // Post the reply
-            const pullNumber = ${{ steps.check.outputs.pull_number }};
-            const commentId = ${{ steps.check.outputs.comment_id }};
-
-            // Try to reply to review comment first
-            try {
-              await github.rest.pulls.createReplyForReviewComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: pullNumber,
-                comment_id: commentId,
-                body: reply
-              });
-              console.log('Posted reply to review comment');
-            } catch (e) {
-              // Fall back to issue comment
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: pullNumber,
-                body: reply
-              });
-              console.log('Posted reply as issue comment');
-            }
+            console.log('Posted reply to review comment');
           } catch (e) {
-            console.error('Error generating reply:', e.message);
-            core.setFailed(`Failed to generate reply: ${e.message}`);
+            console.log('Could not reply to review comment, trying issue comment:', e.message);
+            // Fall back to issue comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pullNumber,
+              body: reply
+            });
+            console.log('Posted reply as issue comment');
           }
