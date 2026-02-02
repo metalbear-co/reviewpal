@@ -174,36 +174,24 @@ runs:
       run: |
         # Build the prompt based on whether this is a reply or new thread
         if [[ "$PARENT_COMMENT" == *"User started a new discussion"* ]]; then
-          PROMPT="You are ReviewPal, an AI code review assistant. A user has started a new discussion thread on some code in a pull request.
+          PROMPT="You are a helpful code reviewer. Someone left a comment on code in a PR.
 
-        CODE CONTEXT:
+        Code:
         \`\`\`
         ${CODE_CONTEXT}
         \`\`\`
 
-        USER'S COMMENT:
-        ${USER_QUESTION}
+        Their comment: ${USER_QUESTION}
 
-        Provide a helpful response to their comment or question about this code. Be friendly and educational. If they're pointing out an issue, acknowledge it and suggest a fix. If they're asking a question, answer it clearly. If they're making a suggestion, evaluate it fairly.
-
-        Keep your response under 300 words. Use markdown formatting for code snippets."
+        Reply naturally like a friendly colleague would. Be brief - 1-3 sentences max. No bullet points or headers. Just a direct, casual response. If you don't have anything useful to add, just say something short and supportive."
         else
-          PROMPT="You are ReviewPal, an AI code review assistant. A user is asking a follow-up question about your previous code review comment.
+          PROMPT="You are a helpful code reviewer. Someone replied to your review comment.
 
-        YOUR ORIGINAL COMMENT:
-        ${PARENT_COMMENT}
+        Your original comment: ${PARENT_COMMENT}
 
-        ${CODE_CONTEXT:+CODE CONTEXT:
-        \`\`\`
-        ${CODE_CONTEXT}
-        \`\`\`}
+        Their reply: ${USER_QUESTION}
 
-        USER'S QUESTION:
-        ${USER_QUESTION}
-
-        Provide a helpful, concise response to their question. Be friendly and educational. If they're asking for clarification, explain in more detail. If they're disagreeing, consider their point fairly and acknowledge if they make a good point. If they're asking how to fix something, provide a specific code example if appropriate.
-
-        Keep your response under 300 words. Use markdown formatting for code snippets."
+        Reply naturally like a friendly colleague would. Be brief - 1-3 sentences max. No bullet points, headers, or code blocks unless absolutely necessary. If they disagree with you and make a good point, just acknowledge it simply. Keep it conversational."
         fi
 
         # Call Claude API
