@@ -36,34 +36,48 @@ runs:
             return;
           }
 
-          // Check if this is a reply to a review comment (inline comment)
-          if (context.payload.action === 'created' && comment.in_reply_to_id) {
-            // Get the parent comment
-            try {
-              const { data: parentComment } = await github.rest.pulls.getReviewComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: comment.in_reply_to_id
-              });
+          // Check if this is a review comment (inline comment on diff)
+          if (context.eventName === 'pull_request_review_comment' && context.payload.action === 'created') {
+            const prNumber = context.payload.pull_request.number;
+            const filePath = comment.path;
+            const line = comment.line || comment.original_line;
 
-              // Check if parent is from ReviewPal
-              if (parentComment.user.login === 'github-actions[bot]' &&
-                  (parentComment.body.includes('**SECURITY**') ||
-                   parentComment.body.includes('**CRASH**') ||
-                   parentComment.body.includes('**DATA-LOSS**') ||
-                   parentComment.body.includes('**PERFORMANCE**'))) {
-                console.log('This is a reply to a ReviewPal comment!');
-                core.setOutput('is_reviewpal_reply', 'true');
-                core.setOutput('parent_comment_body', parentComment.body);
-                core.setOutput('parent_comment_path', parentComment.path);
-                core.setOutput('parent_comment_line', parentComment.line || parentComment.original_line);
-                core.setOutput('user_question', comment.body);
-                core.setOutput('comment_id', comment.id);
-                core.setOutput('pull_number', context.payload.pull_request.number);
-                return;
+            // Check if this is a reply to an existing comment
+            if (comment.in_reply_to_id) {
+              // Get the parent comment
+              try {
+                const { data: parentComment } = await github.rest.pulls.getReviewComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: comment.in_reply_to_id
+                });
+
+                // Check if parent is from ReviewPal
+                if (parentComment.user.login === 'github-actions[bot]') {
+                  console.log('This is a reply to a ReviewPal comment!');
+                  core.setOutput('is_reviewpal_reply', 'true');
+                  core.setOutput('parent_comment_body', parentComment.body);
+                  core.setOutput('parent_comment_path', filePath);
+                  core.setOutput('parent_comment_line', line);
+                  core.setOutput('user_question', comment.body);
+                  core.setOutput('comment_id', comment.id);
+                  core.setOutput('pull_number', prNumber);
+                  return;
+                }
+              } catch (e) {
+                console.log('Error fetching parent comment:', e.message);
               }
-            } catch (e) {
-              console.log('Error fetching parent comment:', e.message);
+            } else {
+              // This is a NEW comment thread on the diff - respond to it!
+              console.log('New comment thread on diff - responding!');
+              core.setOutput('is_reviewpal_reply', 'true');
+              core.setOutput('parent_comment_body', '(User started a new discussion on this code)');
+              core.setOutput('parent_comment_path', filePath);
+              core.setOutput('parent_comment_line', line);
+              core.setOutput('user_question', comment.body);
+              core.setOutput('comment_id', comment.id);
+              core.setOutput('pull_number', prNumber);
+              return;
             }
           }
 
@@ -158,8 +172,23 @@ runs:
         USER_QUESTION: ${{ steps.check.outputs.user_question }}
         CODE_CONTEXT: ${{ steps.context.outputs.code }}
       run: |
-        # Build the prompt
-        PROMPT="You are ReviewPal, an AI code review assistant. A user is asking a follow-up question about your previous code review comment.
+        # Build the prompt based on whether this is a reply or new thread
+        if [[ "$PARENT_COMMENT" == *"User started a new discussion"* ]]; then
+          PROMPT="You are ReviewPal, an AI code review assistant. A user has started a new discussion thread on some code in a pull request.
+
+        CODE CONTEXT:
+        \`\`\`
+        ${CODE_CONTEXT}
+        \`\`\`
+
+        USER'S COMMENT:
+        ${USER_QUESTION}
+
+        Provide a helpful response to their comment or question about this code. Be friendly and educational. If they're pointing out an issue, acknowledge it and suggest a fix. If they're asking a question, answer it clearly. If they're making a suggestion, evaluate it fairly.
+
+        Keep your response under 300 words. Use markdown formatting for code snippets."
+        else
+          PROMPT="You are ReviewPal, an AI code review assistant. A user is asking a follow-up question about your previous code review comment.
 
         YOUR ORIGINAL COMMENT:
         ${PARENT_COMMENT}
@@ -175,6 +204,7 @@ runs:
         Provide a helpful, concise response to their question. Be friendly and educational. If they're asking for clarification, explain in more detail. If they're disagreeing, consider their point fairly and acknowledge if they make a good point. If they're asking how to fix something, provide a specific code example if appropriate.
 
         Keep your response under 300 words. Use markdown formatting for code snippets."
+        fi
 
         # Call Claude API
         RESPONSE=$(curl -s https://api.anthropic.com/v1/messages \
