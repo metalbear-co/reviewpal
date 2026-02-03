@@ -68,16 +68,24 @@ runs:
                 console.log('Error fetching parent comment:', e.message);
               }
             } else {
-              // This is a NEW comment thread on the diff - respond to it!
-              console.log('New comment thread on diff - responding!');
-              core.setOutput('is_reviewpal_reply', 'true');
-              core.setOutput('parent_comment_body', '(User started a new discussion on this code)');
-              core.setOutput('parent_comment_path', filePath);
-              core.setOutput('parent_comment_line', line);
-              core.setOutput('user_question', comment.body);
-              core.setOutput('comment_id', comment.id);
-              core.setOutput('pull_number', prNumber);
-              return;
+              // This is a NEW comment thread on the diff
+              // Only respond if the user explicitly tagged @review-pal or @reviewpal
+              const body = comment.body || '';
+              if (body.match(/@review-?pal\b/i)) {
+                console.log('User mentioned @review-pal in new comment thread - responding!');
+                core.setOutput('is_reviewpal_reply', 'true');
+                core.setOutput('parent_comment_body', '(User started a new discussion on this code)');
+                core.setOutput('parent_comment_path', filePath);
+                core.setOutput('parent_comment_line', line);
+                core.setOutput('user_question', comment.body);
+                core.setOutput('comment_id', comment.id);
+                core.setOutput('pull_number', prNumber);
+                return;
+              } else {
+                console.log('New comment thread but no @review-pal mention, skipping');
+                core.setOutput('is_reviewpal_reply', 'false');
+                return;
+              }
             }
           }
 
@@ -99,9 +107,8 @@ runs:
             );
 
             if (reviewpalComment) {
-              // Check if user's comment mentions @reviewpal or quotes the bot
-              if (body.toLowerCase().includes('@reviewpal') ||
-                  body.toLowerCase().includes('reviewpal')) {
+              // Check if user's comment mentions @review-pal or @reviewpal
+              if (body.match(/@review-?pal\b/i)) {
                 console.log('User is asking ReviewPal a question!');
                 core.setOutput('is_reviewpal_reply', 'true');
                 core.setOutput('parent_comment_body', reviewpalComment.body);
