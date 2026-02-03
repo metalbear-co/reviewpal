@@ -52,9 +52,10 @@ runs:
                   comment_id: comment.in_reply_to_id
                 });
 
-                // Check if parent is from ReviewPal
-                if (parentComment.user.login === 'github-actions[bot]') {
-                  console.log('This is a reply to a ReviewPal comment!');
+                // Check if parent is from ReviewPal AND user tagged @review-pal
+                const replyBody = comment.body || '';
+                if (parentComment.user.login === 'github-actions[bot]' && replyBody.match(/@review-?pal\b/i)) {
+                  console.log('Reply to ReviewPal comment with @review-pal mention - responding!');
                   core.setOutput('is_reviewpal_reply', 'true');
                   core.setOutput('parent_comment_body', parentComment.body);
                   core.setOutput('parent_comment_path', filePath);
