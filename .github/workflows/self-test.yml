@@ -1,0 +1,57 @@
+name: ReviewPal Self-Test
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+  pull_request_review_comment:
+    types: [created]
+
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: reviewpal-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: ReviewPal Review
+        uses: metalbear-co/reviewpal@v2
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          max_hunks: '20'
+          comment_on_pr: 'true'
+
+  reply:
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'pull_request_review_comment' ||
+       github.event_name == 'issue_comment') &&
+      github.event.comment.user.login != 'github-actions[bot]'
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: ReviewPal Reply
+        uses: ./reply
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
