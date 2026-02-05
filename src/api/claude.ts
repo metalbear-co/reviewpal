@@ -38,28 +38,6 @@ function getClient(): Anthropic {
   return client;
 }
 
-const SKIP_PATTERNS = [
-  /\.test\.[jt]sx?$/,
-  /\.spec\.[jt]sx?$/,
-  /__tests__\//,
-  /\/e2e\//,
-  /\/tests?\//,
-  /\.config\.[jt]s$/,
-  /\.config\.cjs$/,
-  /\.config\.mjs$/,
-  /\/\.github\//,
-  /jest\.config/,
-  /playwright\.config/,
-  /vite\.config/,
-  /tsconfig\.json$/,
-  /\.eslintrc/,
-  /\.prettierrc/,
-];
-
-function isTestOrConfigFile(filename: string): boolean {
-  return SKIP_PATTERNS.some((pattern) => pattern.test(filename));
-}
-
 /**
  * Review code with AI (language agnostic)
  */
@@ -68,14 +46,6 @@ export async function reviewCode(
   filename: string,
   model: string = 'claude-sonnet-4-20250514'
 ): Promise<AIReview> {
-  if (isTestOrConfigFile(filename)) {
-    return {
-      language: 'Unknown',
-      summary: '',
-      critical: [],
-    };
-  }
-
   const prompt = `You're a code reviewer. Analyze this code in any programming language and provide suggestions.
 
 CODE (${filename}):
@@ -83,20 +53,30 @@ CODE (${filename}):
 ${code.slice(0, 4000)}
 \`\`\`
 
-Detect the language automatically. ONLY report CRITICAL issues that could actually break production code:
+STEP 1: Determine if this is a test file, test utility, CI/CD config, build config, or dev tooling.
+Look at both the filename AND the code contents. Examples include (in any language):
+- Test files (e.g. *_test.go, *_spec.rb, test_*.py, *.test.ts, *Test.java, #[cfg(test)], etc.)
+- Test fixtures, helpers, mocks, factories
+- CI/CD configs (.github/, Jenkinsfile, .gitlab-ci.yml, etc.)
+- Build/lint/format configs (Makefile, Dockerfile, *.config.*, tsconfig, Cargo.toml, etc.)
+
+If it IS a test or config file, set "isTestOrConfig" to true and return an EMPTY critical array.
+Only exception: flag leaked secrets (API keys, passwords) even in test files.
+
+STEP 2: For production code only, report CRITICAL issues:
 - 🔒 Security vulnerabilities (exposed secrets, SQL injection, XSS)
 - 💥 Will crash in production (unhandled errors, null refs, race conditions)
 - 🗑️ Data loss risks (missing validation, destructive ops)
 - 🐌 Major performance problems (N+1 queries, infinite loops, memory leaks)
 
 Ignore: style, minor optimizations, naming, comments, anything non-critical.
-Do NOT flag issues in test files, test utilities, CI configs, or dev tooling — test code SHOULD fail visibly when something goes wrong.
 Do NOT suggest adding try-catch or null checks where a failure would correctly surface a real bug.
 
 Respond in JSON:
 {
   "language": "language name",
-  "summary": "Factual summary of what this PR does. Use short, declarative sentences. State what it adds, what it changes, and what functionality it provides. Do NOT mention risk level. Be neutral and technical. 2-4 sentences.",
+  "isTestOrConfig": true_or_false,
+  "summary": "Factual summary of what this code does. Use short, declarative sentences. Do NOT mention risk level. Be neutral and technical. 2-4 sentences.",
   "critical": [
     {
       "type": "security|crash|data-loss|performance",
@@ -107,7 +87,7 @@ Respond in JSON:
   ]
 }
 
-Be encouraging and helpful in your summary. If no CRITICAL issues, return empty critical array.`;
+If no CRITICAL issues, return empty critical array.`;
 
   const response = await getClient().messages.create({
     model,
@@ -123,10 +103,11 @@ Be encouraging and helpful in your summary. If no CRITICAL issues, return empty 
       return defaultReview();
     }
     const parsed = JSON.parse(jsonMatch[0]);
+    const isTestOrConfig = parsed.isTestOrConfig === true;
     return {
       language: parsed.language || 'Unknown',
       summary: parsed.summary || 'Code changes',
-      critical: Array.isArray(parsed.critical) ? parsed.critical : []
+      critical: isTestOrConfig ? [] : (Array.isArray(parsed.critical) ? parsed.critical : [])
     };
   } catch (e) {
     console.error('Failed to parse AI response:', e);
