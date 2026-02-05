@@ -30,10 +30,37 @@ function getClient() {
     }
     return client;
 }
+const SKIP_PATTERNS = [
+    /\.test\.[jt]sx?$/,
+    /\.spec\.[jt]sx?$/,
+    /__tests__\//,
+    /\/e2e\//,
+    /\/tests?\//,
+    /\.config\.[jt]s$/,
+    /\.config\.cjs$/,
+    /\.config\.mjs$/,
+    /\/\.github\//,
+    /jest\.config/,
+    /playwright\.config/,
+    /vite\.config/,
+    /tsconfig\.json$/,
+    /\.eslintrc/,
+    /\.prettierrc/,
+];
+function isTestOrConfigFile(filename) {
+    return SKIP_PATTERNS.some((pattern) => pattern.test(filename));
+}
 /**
  * Review code with AI (language agnostic)
  */
 async function reviewCode(code, filename, model = 'claude-sonnet-4-20250514') {
+    if (isTestOrConfigFile(filename)) {
+        return {
+            language: 'Unknown',
+            summary: '',
+            critical: [],
+        };
+    }
     const prompt = `You're a code reviewer. Analyze this code in any programming language and provide suggestions.
 
 CODE (${filename}):
