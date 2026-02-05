@@ -53,13 +53,15 @@ CODE (${filename}):
 ${code.slice(0, 4000)}
 \`\`\`
 
-Detect the language automatically. ONLY report CRITICAL issues that could break production:
+Detect the language automatically. ONLY report CRITICAL issues that could actually break production code:
 - 🔒 Security vulnerabilities (exposed secrets, SQL injection, XSS)
-- 💥 Will crash (unhandled errors, null refs, race conditions)
+- 💥 Will crash in production (unhandled errors, null refs, race conditions)
 - 🗑️ Data loss risks (missing validation, destructive ops)
 - 🐌 Major performance problems (N+1 queries, infinite loops, memory leaks)
 
 Ignore: style, minor optimizations, naming, comments, anything non-critical.
+Do NOT flag issues in test files, test utilities, CI configs, or dev tooling — test code SHOULD fail visibly when something goes wrong.
+Do NOT suggest adding try-catch or null checks where a failure would correctly surface a real bug.
 
 Respond in JSON:
 {

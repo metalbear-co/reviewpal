@@ -8,6 +8,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.initClaudeClient = initClaudeClient;
 exports.reviewCode = reviewCode;
+exports.replyToComment = replyToComment;
 const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
 let client = null;
 /**
@@ -40,13 +41,15 @@ CODE (${filename}):
 ${code.slice(0, 4000)}
 \`\`\`
 
-Detect the language automatically. ONLY report CRITICAL issues that could break production:
+Detect the language automatically. ONLY report CRITICAL issues that could actually break production code:
 - 🔒 Security vulnerabilities (exposed secrets, SQL injection, XSS)
-- 💥 Will crash (unhandled errors, null refs, race conditions)
+- 💥 Will crash in production (unhandled errors, null refs, race conditions)
 - 🗑️ Data loss risks (missing validation, destructive ops)
 - 🐌 Major performance problems (N+1 queries, infinite loops, memory leaks)
 
 Ignore: style, minor optimizations, naming, comments, anything non-critical.
+Do NOT flag issues in test files, test utilities, CI configs, or dev tooling — test code SHOULD fail visibly when something goes wrong.
+Do NOT suggest adding try-catch or null checks where a failure would correctly surface a real bug.
 
 Respond in JSON:
 {
@@ -92,5 +95,33 @@ function defaultReview() {
         summary: 'Unable to analyze',
         critical: []
     };
+}
+/**
+ * Reply to a user's question about a code review comment
+ */
+async function replyToComment(question, originalComment, codeContext, model = 'claude-sonnet-4-20250514') {
+    const prompt = `You are ReviewPal, an AI code review assistant. A user is asking a follow-up question about your previous code review comment.
+
+YOUR ORIGINAL COMMENT:
+${originalComment}
+
+CODE CONTEXT:
+\`\`\`
+${codeContext.slice(0, 3000)}
+\`\`\`
+
+USER'S QUESTION:
+${question}
+
+Provide a helpful, concise response to their question. Be friendly and educational. If they're asking for clarification, explain in more detail. If they're disagreeing, consider their point fairly. If they're asking how to fix something, provide a specific code example if appropriate.
+
+Keep your response under 500 words. Use markdown formatting for code snippets.`;
+    const response = await getClient().messages.create({
+        model,
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: prompt }]
+    });
+    const text = response.content[0].type === 'text' ? response.content[0].text : '';
+    return text || 'I apologize, but I was unable to generate a response. Please try rephrasing your question.';
 }
 //# sourceMappingURL=claude.js.map

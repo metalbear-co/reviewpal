@@ -19,4 +19,8 @@ export declare function initClaudeClient(apiKey?: string): void;
  * Review code with AI (language agnostic)
  */
 export declare function reviewCode(code: string, filename: string, model?: string): Promise<AIReview>;
+/**
+ * Reply to a user's question about a code review comment
+ */
+export declare function replyToComment(question: string, originalComment: string, codeContext: string, model?: string): Promise<string>;
 //# sourceMappingURL=claude.d.ts.map
