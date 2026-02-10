@@ -57,8 +57,8 @@ runs:
           all_shas="$all_shas"$'\n'"$shas"
         done <<< "$changed_files"
 
-        # Deduplicate SHAs to minimize API calls
-        unique_shas=$(echo "$all_shas" | grep -v '^$' | sort -u)
+        # Deduplicate SHAs to minimize API calls, cap at 100 to avoid rate limiting
+        unique_shas=$(echo "$all_shas" | grep -v '^$' | sort -u | head -100)
         sha_count=$(echo "$unique_shas" | wc -l | tr -d ' ')
         echo "Querying $sha_count unique commits for author info..."
 
