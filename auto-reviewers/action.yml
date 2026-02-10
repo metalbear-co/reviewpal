@@ -65,8 +65,10 @@ runs:
         # Resolve GitHub logins from commit SHAs
         all_authors=""
         for sha in $unique_shas; do
-          login=$(gh api "repos/$REPO/commits/$sha" \
-            --jq '.author.login // empty' 2>/dev/null || true)
+          login=""
+          if api_result=$(gh api "repos/$REPO/commits/$sha" --jq '.author.login // empty' 2>/dev/null); then
+            login="$api_result"
+          fi
           if [ -n "$login" ]; then
             all_authors="$all_authors"$'\n'"$login"
           fi
@@ -96,7 +98,8 @@ runs:
           | awk '{print $2}' \
           | grep -Ev "$exclude_pattern" \
           | grep -v '\[bot\]$' \
-          | head -"$MAX_REVIEWERS")
+          | head -"$MAX_REVIEWERS" \
+          || true)
 
         if [ -z "$reviewers" ]; then
           echo "No eligible reviewers found after filtering."
