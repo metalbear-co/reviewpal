@@ -78,18 +78,14 @@ If no CRITICAL issues, return empty critical array.`;
     contents: prompt,
     config: {
       responseMimeType: 'application/json',
-      maxOutputTokens: 1500,
+      maxOutputTokens: 4000,
     },
   });
 
   const text = response.text || '';
 
   try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return { filename: file.filename, summary: 'Unable to analyze', critical: [], language: 'Unknown' };
-    }
-    const parsed = JSON.parse(jsonMatch[0]);
+    const parsed = JSON.parse(text);
     return {
       filename: file.filename,
       summary: parsed.summary || 'Code changes',

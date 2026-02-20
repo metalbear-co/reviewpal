@@ -73,16 +73,12 @@ Guidelines:
         contents: prompt,
         config: {
             responseMimeType: 'application/json',
-            maxOutputTokens: 1500,
+            maxOutputTokens: 4000,
         },
     });
     const text = response.text || '';
     try {
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-            return defaultTriageResult(files);
-        }
-        const parsed = JSON.parse(jsonMatch[0]);
+        const parsed = JSON.parse(text);
         return {
             prSummary: parsed.prSummary || 'PR changes',
             themes: Array.isArray(parsed.themes) ? parsed.themes : [],
