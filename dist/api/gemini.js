@@ -1,40 +1,28 @@
 "use strict";
 /**
- * Claude API wrapper for AI code review
+ * Google Gemini API wrapper for AI code review
  */
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.initClaudeClient = initClaudeClient;
+exports.createGeminiClient = createGeminiClient;
 exports.reviewCode = reviewCode;
 exports.replyToComment = replyToComment;
-const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
-let client = null;
+const genai_1 = require("@google/genai");
+const DEFAULT_MODEL = 'gemini-2.5-pro';
 /**
- * Initialize Claude client
+ * Create a Gemini client
  */
-function initClaudeClient(apiKey) {
-    const key = apiKey || process.env.ANTHROPIC_API_KEY;
+function createGeminiClient(apiKey) {
+    const key = apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     if (!key) {
-        throw new Error('ANTHROPIC_API_KEY is required');
+        throw new Error('GEMINI_API_KEY or GOOGLE_API_KEY environment variable required');
     }
-    client = new sdk_1.default({ apiKey: key });
-}
-/**
- * Get Claude client (throws if not initialized)
- */
-function getClient() {
-    if (!client) {
-        throw new Error('Claude client not initialized. Call initClaudeClient first.');
-    }
-    return client;
+    return new genai_1.GoogleGenAI({ apiKey: key });
 }
 /**
  * Review code with AI (language agnostic)
- * Accepts full unified diff (with +/- prefixes) instead of just additions
+ * Accepts full unified diff (with +/- prefixes)
  */
-async function reviewCode(code, filename, model = 'claude-sonnet-4-20250514', architectureContext) {
+async function reviewCode(client, code, filename, model = DEFAULT_MODEL, architectureContext) {
     let contextSection = '';
     if (architectureContext) {
         contextSection = `\nPROJECT CONTEXT:\n${architectureContext}\n\nUse this context to understand the codebase architecture when reviewing.\n`;
@@ -63,10 +51,10 @@ If it IS a test or config file, set "isTestOrConfig" to true and return an EMPTY
 Only exception: flag leaked secrets (API keys, passwords) even in test files.
 
 STEP 2: For production code only, report CRITICAL issues:
-- 🔒 Security vulnerabilities (exposed secrets, SQL injection, XSS)
-- 💥 Will crash in production (unhandled errors, null refs, race conditions)
-- 🗑️ Data loss risks (missing validation, destructive ops)
-- 🐌 Major performance problems (N+1 queries, infinite loops, memory leaks)
+- Security vulnerabilities (exposed secrets, SQL injection, XSS)
+- Will crash in production (unhandled errors, null refs, race conditions)
+- Data loss risks (missing validation, destructive ops)
+- Major performance problems (N+1 queries, infinite loops, memory leaks)
 
 Pay attention to BOTH additions and deletions. A deletion that removes important validation or error handling is a critical issue too.
 
@@ -89,12 +77,15 @@ Respond in JSON:
 }
 
 If no CRITICAL issues, return empty critical array.`;
-    const response = await getClient().messages.create({
+    const response = await client.models.generateContent({
         model,
-        max_tokens: 1500,
-        messages: [{ role: 'user', content: prompt }]
+        contents: prompt,
+        config: {
+            responseMimeType: 'application/json',
+            maxOutputTokens: 1500,
+        },
     });
-    const text = response.content[0].type === 'text' ? response.content[0].text : '';
+    const text = response.text || '';
     try {
         const jsonMatch = text.match(/\{[\s\S]*\}/);
         if (!jsonMatch) {
@@ -123,7 +114,7 @@ function defaultReview() {
 /**
  * Reply to a user's question about a code review comment
  */
-async function replyToComment(question, originalComment, codeContext, model = 'claude-sonnet-4-20250514') {
+async function replyToComment(client, question, originalComment, codeContext, model = DEFAULT_MODEL) {
     const prompt = `You are ReviewPal, an AI code review assistant. A user is asking a follow-up question about your previous code review comment.
 
 YOUR ORIGINAL COMMENT:
@@ -140,12 +131,13 @@ ${question}
 Provide a helpful, concise response to their question. Be friendly and educational. If they're asking for clarification, explain in more detail. If they're disagreeing, consider their point fairly. If they're asking how to fix something, provide a specific code example if appropriate.
 
 Keep your response under 500 words. Use markdown formatting for code snippets.`;
-    const response = await getClient().messages.create({
+    const response = await client.models.generateContent({
         model,
-        max_tokens: 1000,
-        messages: [{ role: 'user', content: prompt }]
+        contents: prompt,
+        config: {
+            maxOutputTokens: 1000,
+        },
     });
-    const text = response.content[0].type === 'text' ? response.content[0].text : '';
-    return text || 'I apologize, but I was unable to generate a response. Please try rephrasing your question.';
+    return response.text || 'I apologize, but I was unable to generate a response. Please try rephrasing your question.';
 }
-//# sourceMappingURL=claude.js.map
+//# sourceMappingURL=gemini.js.map

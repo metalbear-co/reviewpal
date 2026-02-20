@@ -1,5 +1,5 @@
 name: 'ReviewPal'
-description: 'AI-powered code review for any language using Claude'
+description: 'AI-powered code review for any language using Gemini'
 author: 'Han Kim'
 
 branding:
@@ -7,21 +7,29 @@ branding:
   color: 'purple'
 
 inputs:
-  anthropic_api_key:
-    description: 'Anthropic API key for Claude analysis (REQUIRED)'
+  gemini_api_key:
+    description: 'Google Gemini API key (REQUIRED)'
     required: true
   github_token:
     description: 'GitHub token for posting comments (defaults to GITHUB_TOKEN)'
     required: false
     default: ${{ github.token }}
   model:
-    description: 'Claude model to use (if API key provided)'
+    description: 'Gemini model to use'
     required: false
-    default: 'claude-sonnet-4-20250514'
+    default: 'gemini-2.5-pro'
   max_hunks:
-    description: 'Maximum number of hunks to analyze'
+    description: 'Maximum number of hunks to analyze (legacy mode only)'
     required: false
     default: '20'
+  max_api_calls:
+    description: 'Maximum API calls for triage pipeline (1 triage + N-1 deep reviews)'
+    required: false
+    default: '10'
+  legacy_mode:
+    description: 'Use legacy per-hunk analysis instead of triage pipeline'
+    required: false
+    default: 'false'
   comment_on_pr:
     description: 'Post analysis as PR comment'
     required: false
@@ -87,31 +95,42 @@ runs:
       shell: bash
       id: analyze
       env:
-        ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+        GEMINI_API_KEY: ${{ inputs.gemini_api_key }}
         GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_WORKSPACE: ${{ github.workspace }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       run: |
         cd ${{ github.action_path }}
-        
+
+        # Build pipeline options
+        PIPELINE_OPTS=""
+        if [ "${{ inputs.legacy_mode }}" = "true" ]; then
+          PIPELINE_OPTS="$PIPELINE_OPTS --legacy --max-hunks ${{ inputs.max_hunks }}"
+        else
+          PIPELINE_OPTS="$PIPELINE_OPTS --max-api-calls ${{ inputs.max_api_calls }}"
+        fi
+
         # Run analysis (quiet mode to hide spinner)
         node dist/index.js ${{ steps.diff.outputs.diff_file }} \
           --format ${{ inputs.format }} \
           --quiet \
-          --max-hunks ${{ inputs.max_hunks }} \
-          --model ${{ inputs.model }} > /tmp/analysis.md 2>&1 || true
-        
+          --repo-root "$GITHUB_WORKSPACE" \
+          --model ${{ inputs.model }} \
+          $PIPELINE_OPTS > /tmp/analysis.md 2>&1 || true
+
         # Export for outputs
         echo "analysis_markdown<<EOF" >> $GITHUB_OUTPUT
         cat /tmp/analysis.md >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
-        
+
         # Also run JSON for structured data
         node dist/index.js ${{ steps.diff.outputs.diff_file }} \
           --format json \
           --quiet \
-          --max-hunks ${{ inputs.max_hunks }} \
-          --model ${{ inputs.model }} > /tmp/analysis.json 2>&1 || echo '{"files":[],"totalHunks":0,"aiCodeLikelihood":"low"}' > /tmp/analysis.json
+          --repo-root "$GITHUB_WORKSPACE" \
+          --model ${{ inputs.model }} \
+          $PIPELINE_OPTS > /tmp/analysis.json 2>&1 || echo '{"files":[],"totalHunks":0,"aiCodeLikelihood":"low"}' > /tmp/analysis.json
         
         # Extract key metrics safely
         echo "total_files=$(jq '.files | length // 0' /tmp/analysis.json)" >> $GITHUB_OUTPUT
