@@ -1,6 +1,7 @@
 /**
  * Architecture context loading for ReviewPal
- * Reads CLAUDE.md and .reviewpal.yml to provide project context to AI reviews
+ * Reads CLAUDE.md and .reviewpal.yml to provide project context to AI reviews.
+ * Supports cross-repo context via GitHub API (org/repo:path syntax).
  */
 export interface ReviewPalConfig {
     skip_patterns: string[];
