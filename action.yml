@@ -154,7 +154,48 @@ runs:
             'data-loss': '🗑️',
             performance: '🐌'
           };
-          
+
+          // Parse the diff to find valid line numbers per file (lines visible in the diff)
+          const diffContent = fs.readFileSync('/tmp/pr.diff', 'utf8');
+          const validLines = {};  // { "path/to/file": Set([line numbers]) }
+          let currentFile = null;
+          let newLineNum = 0;
+          for (const line of diffContent.split('\n')) {
+            const fileMatch = line.match(/^\+\+\+ b\/(.+)/);
+            if (fileMatch) {
+              currentFile = fileMatch[1];
+              if (!validLines[currentFile]) validLines[currentFile] = new Set();
+              continue;
+            }
+            const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+            if (hunkMatch) {
+              newLineNum = parseInt(hunkMatch[1], 10);
+              continue;
+            }
+            if (currentFile && !line.startsWith('---') && !line.startsWith('diff ')) {
+              if (line.startsWith('+') || line.startsWith(' ')) {
+                validLines[currentFile].add(newLineNum);
+                newLineNum++;
+              } else if (line.startsWith('-')) {
+                // Deleted lines don't increment the new file line counter
+              } else {
+                newLineNum++;
+              }
+            }
+          }
+
+          // Find the closest valid diff line for a file
+          function closestValidLine(filePath, targetLine) {
+            const lines = validLines[filePath];
+            if (!lines || lines.size === 0) return null;
+            const sorted = [...lines].sort((a, b) => a - b);
+            let best = sorted[0];
+            for (const l of sorted) {
+              if (Math.abs(l - targetLine) < Math.abs(best - targetLine)) best = l;
+            }
+            return best;
+          }
+
           // Collect all critical issues
           const allIssues = [];
           for (const file of analysisJson.files || []) {
@@ -224,11 +265,21 @@ runs:
             return;
           }
           
-          // Post inline comments on each line and capture comment IDs
+          // Post inline comments on each line, snapping to nearest valid diff line
           const headSha = context.payload.pull_request.head.sha;
           const commentLinks = [];
-          
+          const failedIssues = [];
+
           for (const item of allIssues) {
+            const diffLine = closestValidLine(item.file, item.line);
+            if (!diffLine) {
+              console.log(`No valid diff lines for ${item.file}, will include in summary`);
+              failedIssues.push(item);
+              continue;
+            }
+            if (Math.abs(diffLine - item.line) > 0) {
+              console.log(`Snapped ${item.file}:${item.line} -> ${diffLine} (nearest diff line)`);
+            }
             try {
               const comment = await github.rest.pulls.createReviewComment({
                 owner: context.repo.owner,
@@ -237,14 +288,13 @@ runs:
                 body: `${EMOJI_MAP[item.type] || '⚠️'} **${item.type.toUpperCase()}**: ${item.friendlySuggestion}`,
                 commit_id: headSha,
                 path: item.file,
-                line: item.line,
+                line: diffLine,
                 side: 'RIGHT'
               });
-              
-              // Save comment link for summary (use #discussion_r{id} anchor format)
+
               const commentId = comment.data.id;
               const commentAnchor = `#discussion_r${commentId}`;
-              
+
               commentLinks.push({
                 type: item.type,
                 url: commentAnchor,
@@ -252,7 +302,8 @@ runs:
                 line: item.line
               });
             } catch (e) {
-              console.log(`Failed to comment on ${item.file}:${item.line}:`, e.message);
+              console.log(`Failed to comment on ${item.file}:${diffLine}:`, e.message);
+              failedIssues.push(item);
             }
           }
           
@@ -298,9 +349,15 @@ runs:
               summary += `| ${emoji} **${typeLabel}** | ${items.length} | ${links} |\n`;
             }
           } else {
-            // Inline comments failed, list issues directly in summary
             summary += `## 💡 Suggestions\n\n`;
-            for (const item of allIssues) {
+          }
+
+          // Always include issues that couldn't be posted inline
+          if (failedIssues.length > 0) {
+            if (commentLinks.length > 0) {
+              summary += `\n### Additional findings\n\n`;
+            }
+            for (const item of failedIssues) {
               const emoji = EMOJI_MAP[item.type] || '⚠️';
               summary += `${emoji} **${item.type.toUpperCase()}** in \`${item.file}:${item.line}\`\n`;
               summary += `> ${item.friendlySuggestion}\n\n`;
