@@ -36,23 +36,6 @@ jobs:
           max_hunks: '20'
           comment_on_pr: 'true'
 
-  auto-reviewers:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && github.event.action == 'opened'
-
-    permissions:
-      contents: read
-      pull-requests: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Auto-assign reviewers
-        uses: ./auto-reviewers
-
   reply:
     runs-on: ubuntu-latest
     if: |
