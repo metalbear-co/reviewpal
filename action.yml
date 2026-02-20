@@ -156,8 +156,10 @@ runs:
           };
 
           // Parse the diff to find valid line numbers per file (lines visible in the diff)
+          // Also detect .not() on newly added lines
           const diffContent = fs.readFileSync('/tmp/pr.diff', 'utf8');
           const validLines = {};  // { "path/to/file": Set([line numbers]) }
+          const dotNotLines = [];  // { file, line } for added lines containing .not()
           let currentFile = null;
           let newLineNum = 0;
           for (const line of diffContent.split('\n')) {
@@ -175,6 +177,10 @@ runs:
             if (currentFile && !line.startsWith('---') && !line.startsWith('diff ')) {
               if (line.startsWith('+') || line.startsWith(' ')) {
                 validLines[currentFile].add(newLineNum);
+                // Detect .not() on added lines only (not context lines)
+                if (line.startsWith('+') && line.match(/\.not\(\)/)) {
+                  dotNotLines.push({ file: currentFile, line: newLineNum });
+                }
                 newLineNum++;
               } else if (line.startsWith('-')) {
                 // Deleted lines don't increment the new file line counter
@@ -262,11 +268,33 @@ runs:
             }
             
             console.log('No critical issues found - posted confirmation');
-            return;
           }
-          
-          // Post inline comments on each line, snapping to nearest valid diff line
+
+          // Post chef's kiss on every .not() in added lines
           const headSha = context.payload.pull_request.head.sha;
+          if (dotNotLines.length > 0) {
+            console.log(`Found ${dotNotLines.length} .not() usage(s) - posting chef's kiss`);
+            for (const dot of dotNotLines) {
+              try {
+                await github.rest.pulls.createReviewComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: context.issue.number,
+                  body: '🤌',
+                  commit_id: headSha,
+                  path: dot.file,
+                  line: dot.line,
+                  side: 'RIGHT'
+                });
+              } catch (e) {
+                console.log(`Failed to chef-kiss ${dot.file}:${dot.line}:`, e.message);
+              }
+            }
+          }
+
+          if (allIssues.length === 0) return;
+
+          // Post inline comments on each line, snapping to nearest valid diff line
           const commentLinks = [];
           const failedIssues = [];
 
