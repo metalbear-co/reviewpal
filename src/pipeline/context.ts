@@ -1,7 +1,7 @@
 /**
  * Architecture context loading for ReviewPal
- * Reads CLAUDE.md and .reviewpal.yml to provide project context to AI reviews.
- * Supports cross-repo context via GitHub API (org/repo:path syntax).
+ * Reads CLAUDE.md and optionally .reviewpal.yml for config.
+ * Fetches CLAUDE.md from related repos via GitHub API.
  */
 
 import { readFileSync, existsSync } from 'fs';
@@ -14,6 +14,7 @@ export interface ReviewPalConfig {
   review_instructions: string[];
   focus_areas: string[];
   context_files: string[];
+  related_repos: string[];
   max_api_calls: number;
 }
 
@@ -27,6 +28,7 @@ const DEFAULT_CONFIG: ReviewPalConfig = {
   review_instructions: [],
   focus_areas: [],
   context_files: [],
+  related_repos: [],
   max_api_calls: 10,
 };
 
@@ -67,13 +69,20 @@ function fetchGitHubFile(owner: string, repo: string, filePath: string): string 
 
 /**
  * Load architecture context from CLAUDE.md and .reviewpal.yml
+ *
+ * Works with zero config: just reads CLAUDE.md from the repo root.
+ * Optional .reviewpal.yml adds:
+ *   - related_repos: list of "org/repo" to auto-fetch their CLAUDE.md
+ *   - skip_patterns: glob patterns for files to skip
+ *   - context_files: additional local or cross-repo files ("org/repo:path")
+ *   - review_instructions, focus_areas: optional power-user overrides
  */
 export function loadArchitectureContext(repoRoot?: string): ArchitectureContext {
   const root = repoRoot || process.cwd();
   const contextParts: string[] = [];
   let config = { ...DEFAULT_CONFIG };
 
-  // Load .reviewpal.yml
+  // Load .reviewpal.yml (optional)
   const configPath = join(root, '.reviewpal.yml');
   if (existsSync(configPath)) {
     try {
@@ -85,6 +94,7 @@ export function loadArchitectureContext(repoRoot?: string): ArchitectureContext 
           review_instructions: asStringArray(parsed.review_instructions),
           focus_areas: asStringArray(parsed.focus_areas),
           context_files: asStringArray(parsed.context_files),
+          related_repos: asStringArray(parsed.related_repos),
           max_api_calls: typeof parsed.max_api_calls === 'number' ? parsed.max_api_calls : DEFAULT_CONFIG.max_api_calls,
         };
       }
@@ -93,7 +103,7 @@ export function loadArchitectureContext(repoRoot?: string): ArchitectureContext 
     }
   }
 
-  // Load CLAUDE.md
+  // Load local CLAUDE.md
   const claudeMdPath = join(root, 'CLAUDE.md');
   if (existsSync(claudeMdPath)) {
     const content = readFileSync(claudeMdPath, 'utf-8');
@@ -101,19 +111,29 @@ export function loadArchitectureContext(repoRoot?: string): ArchitectureContext 
     contextParts.push(`## Project Architecture (from CLAUDE.md)\n\n${truncated}`);
   }
 
+  // Auto-fetch CLAUDE.md from related repos
+  for (const repoRef of config.related_repos) {
+    const parts = repoRef.split('/');
+    if (parts.length !== 2) continue;
+    const [owner, repo] = parts;
+    const content = fetchGitHubFile(owner, repo, 'CLAUDE.md');
+    if (content) {
+      const truncated = truncateAtSectionBoundary(content, 2000);
+      contextParts.push(`## Related repo: ${owner}/${repo} (from CLAUDE.md)\n\n${truncated}`);
+    }
+  }
+
   // Load additional context files (local or cross-repo)
   for (const contextFile of config.context_files) {
     const crossRef = parseCrossRepoRef(contextFile);
 
     if (crossRef) {
-      // Cross-repo: fetch via GitHub API
       const content = fetchGitHubFile(crossRef.owner, crossRef.repo, crossRef.path);
       if (content) {
         const truncated = truncateAtSectionBoundary(content, 2000);
         contextParts.push(`## Context from ${crossRef.owner}/${crossRef.repo}:${crossRef.path}\n\n${truncated}`);
       }
     } else {
-      // Local file
       const filePath = join(root, contextFile);
       if (existsSync(filePath)) {
         try {
@@ -127,12 +147,12 @@ export function loadArchitectureContext(repoRoot?: string): ArchitectureContext 
     }
   }
 
-  // Add review instructions
+  // Add review instructions (optional power-user config)
   if (config.review_instructions.length > 0) {
     contextParts.push(`## Review Instructions\n\n${config.review_instructions.map(r => `- ${r}`).join('\n')}`);
   }
 
-  // Add focus areas (cross-system rules)
+  // Add focus areas (optional power-user config)
   if (config.focus_areas.length > 0) {
     contextParts.push(`## Cross-System Rules\n\n${config.focus_areas.map(r => `- ${r}`).join('\n')}`);
   }
@@ -149,7 +169,6 @@ export function loadArchitectureContext(repoRoot?: string): ArchitectureContext 
 function truncateAtSectionBoundary(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
 
-  // Find the last section heading before the limit
   const truncated = text.slice(0, maxChars);
   const lastHeading = truncated.lastIndexOf('\n## ');
 
@@ -157,7 +176,6 @@ function truncateAtSectionBoundary(text: string, maxChars: number): string {
     return truncated.slice(0, lastHeading) + '\n\n[truncated]';
   }
 
-  // Fall back to last paragraph break
   const lastParagraph = truncated.lastIndexOf('\n\n');
   if (lastParagraph > maxChars * 0.5) {
     return truncated.slice(0, lastParagraph) + '\n\n[truncated]';
