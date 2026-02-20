@@ -1,11 +1,10 @@
 # ReviewPal - GitHub Action Workflow
 # Drop this file into .github/workflows/ to enable AI-powered code reviews
-# with interactive comment replies and automatic reviewer assignment!
+# with interactive comment replies!
 #
 # Features:
 # - Automatic PR review on open/sync
 # - Reply to user questions on ReviewPal comments
-# - Auto-assign reviewers based on git history of changed files
 #
 # Required: Add ANTHROPIC_API_KEY secret to your repository
 
@@ -50,30 +49,7 @@ jobs:
           max_hunks: '20'
           comment_on_pr: 'true'
 
-  # Job 2: Auto-assign reviewers on PR open
-  auto-reviewers:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && github.event.action == 'opened'
-
-    permissions:
-      contents: read
-      pull-requests: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Auto-assign reviewers
-        uses: metalbear-co/reviewpal/auto-reviewers@v2
-        # Optional inputs:
-        # with:
-        #   max_reviewers: '3'
-        #   history_depth: '20'
-        #   ignore_users: 'dependabot,renovate'
-
-  # Job 3: Reply to comments on ReviewPal's review comments
+  # Job 2: Reply to comments on ReviewPal's review comments
   reply:
     runs-on: ubuntu-latest
     if: |
