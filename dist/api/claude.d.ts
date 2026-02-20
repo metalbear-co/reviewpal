@@ -17,8 +17,9 @@ export interface AIReview {
 export declare function initClaudeClient(apiKey?: string): void;
 /**
  * Review code with AI (language agnostic)
+ * Accepts full unified diff (with +/- prefixes) instead of just additions
  */
-export declare function reviewCode(code: string, filename: string, model?: string): Promise<AIReview>;
+export declare function reviewCode(code: string, filename: string, model?: string, architectureContext?: string): Promise<AIReview>;
 /**
  * Reply to a user's question about a code review comment
  */

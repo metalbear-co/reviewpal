@@ -99,12 +99,41 @@ export interface HunkAnalysis {
   processingTime: number;
 }
 
+// Triage pipeline types
+export interface TriageResult {
+  prSummary: string;
+  themes: string[];
+  highPriorityFiles: string[];
+  crossSystemImplications: CrossSystemImplication[];
+}
+
+export interface CrossSystemImplication {
+  description: string;
+  filesInvolved: string[];
+  risk: 'high' | 'medium' | 'low';
+}
+
+export interface DeepReviewResult {
+  filename: string;
+  summary: string;
+  critical: Array<{
+    type: 'security' | 'crash' | 'data-loss' | 'performance';
+    line: number;
+    issue: string;
+    friendlySuggestion: string;
+  }>;
+  language: string;
+}
+
 // Full review result
 export interface ReviewResult {
   files: FileAnalysis[];
   totalHunks: number;
   totalProcessingTime: number;
   aiCodeLikelihood: 'high' | 'medium' | 'low';
+  // New triage pipeline fields
+  triage?: TriageResult;
+  deepReviews?: DeepReviewResult[];
 }
 
 export interface FileAnalysis {
@@ -129,7 +158,7 @@ export type OutputFormat = 'markdown' | 'json' | 'text' | 'github' | 'friendly';
 
 // Config file
 export interface Config {
-  anthropicApiKey?: string;
+  geminiApiKey?: string;
   model: string;
   complexityThresholds: ComplexityThresholds;
   enabledAnalyzers: {
@@ -148,7 +177,7 @@ export interface ComplexityThresholds {
 }
 
 export const DEFAULT_CONFIG: Config = {
-  model: 'claude-sonnet-4-20250514',
+  model: 'gemini-2.5-pro',
   complexityThresholds: {
     nestingDepth: 3,
     cyclomaticComplexity: 10,

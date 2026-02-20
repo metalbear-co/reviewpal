@@ -74,11 +74,35 @@ export interface HunkAnalysis {
     complexity?: ComplexityAnalysis;
     processingTime: number;
 }
+export interface TriageResult {
+    prSummary: string;
+    themes: string[];
+    highPriorityFiles: string[];
+    crossSystemImplications: CrossSystemImplication[];
+}
+export interface CrossSystemImplication {
+    description: string;
+    filesInvolved: string[];
+    risk: 'high' | 'medium' | 'low';
+}
+export interface DeepReviewResult {
+    filename: string;
+    summary: string;
+    critical: Array<{
+        type: 'security' | 'crash' | 'data-loss' | 'performance';
+        line: number;
+        issue: string;
+        friendlySuggestion: string;
+    }>;
+    language: string;
+}
 export interface ReviewResult {
     files: FileAnalysis[];
     totalHunks: number;
     totalProcessingTime: number;
     aiCodeLikelihood: 'high' | 'medium' | 'low';
+    triage?: TriageResult;
+    deepReviews?: DeepReviewResult[];
 }
 export interface FileAnalysis {
     filename: string;
@@ -97,7 +121,7 @@ export interface ReviewOptions {
 }
 export type OutputFormat = 'markdown' | 'json' | 'text' | 'github' | 'friendly';
 export interface Config {
-    anthropicApiKey?: string;
+    geminiApiKey?: string;
     model: string;
     complexityThresholds: ComplexityThresholds;
     enabledAnalyzers: {

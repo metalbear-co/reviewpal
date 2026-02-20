@@ -1,56 +1,60 @@
 /**
- * Claude API wrapper for AI code review
+ * Google Gemini API wrapper for AI code review
  */
 
-import Anthropic from '@anthropic-ai/sdk';
-
-let client: Anthropic | null = null;
+import { GoogleGenAI } from '@google/genai';
 
 export interface AIReview {
-  summary: string;      // 1 sentence: what is this PR
+  summary: string;
   critical: Array<{
     type: 'security' | 'crash' | 'data-loss' | 'performance';
     line: number;
-    issue: string;      // Brief description
-    friendlySuggestion: string;  // Polite, helpful suggestion for inline comment
+    issue: string;
+    friendlySuggestion: string;
   }>;
   language: string;
 }
 
-/**
- * Initialize Claude client
- */
-export function initClaudeClient(apiKey?: string): void {
-  const key = apiKey || process.env.ANTHROPIC_API_KEY;
-  if (!key) {
-    throw new Error('ANTHROPIC_API_KEY is required');
-  }
-  client = new Anthropic({ apiKey: key });
-}
+const DEFAULT_MODEL = 'gemini-2.5-pro';
 
 /**
- * Get Claude client (throws if not initialized)
+ * Create a Gemini client
  */
-function getClient(): Anthropic {
-  if (!client) {
-    throw new Error('Claude client not initialized. Call initClaudeClient first.');
+export function createGeminiClient(apiKey?: string): GoogleGenAI {
+  const key = apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  if (!key) {
+    throw new Error('GEMINI_API_KEY or GOOGLE_API_KEY environment variable required');
   }
-  return client;
+  return new GoogleGenAI({ apiKey: key });
 }
 
 /**
  * Review code with AI (language agnostic)
+ * Accepts full unified diff (with +/- prefixes)
  */
 export async function reviewCode(
+  client: GoogleGenAI,
   code: string,
   filename: string,
-  model: string = 'claude-sonnet-4-20250514'
+  model: string = DEFAULT_MODEL,
+  architectureContext?: string
 ): Promise<AIReview> {
-  const prompt = `You're a code reviewer. Analyze this code in any programming language and provide suggestions.
+  let contextSection = '';
+  if (architectureContext) {
+    contextSection = `\nPROJECT CONTEXT:\n${architectureContext}\n\nUse this context to understand the codebase architecture when reviewing.\n`;
+  }
 
-CODE (${filename}):
-\`\`\`
-${code.slice(0, 4000)}
+  const prompt = `You're a code reviewer. Analyze this unified diff in any programming language and provide suggestions.
+
+The diff uses standard unified diff format:
+- Lines starting with "+" are additions (new code)
+- Lines starting with "-" are deletions (removed code)
+- Lines starting with " " (space) are context (unchanged code)
+- Line numbers in the diff refer to the NEW file
+${contextSection}
+DIFF (${filename}):
+\`\`\`diff
+${code.slice(0, 8000)}
 \`\`\`
 
 STEP 1: Determine if this is a test file, test utility, CI/CD config, build config, or dev tooling.
@@ -64,10 +68,12 @@ If it IS a test or config file, set "isTestOrConfig" to true and return an EMPTY
 Only exception: flag leaked secrets (API keys, passwords) even in test files.
 
 STEP 2: For production code only, report CRITICAL issues:
-- 🔒 Security vulnerabilities (exposed secrets, SQL injection, XSS)
-- 💥 Will crash in production (unhandled errors, null refs, race conditions)
-- 🗑️ Data loss risks (missing validation, destructive ops)
-- 🐌 Major performance problems (N+1 queries, infinite loops, memory leaks)
+- Security vulnerabilities (exposed secrets, SQL injection, XSS)
+- Will crash in production (unhandled errors, null refs, race conditions)
+- Data loss risks (missing validation, destructive ops)
+- Major performance problems (N+1 queries, infinite loops, memory leaks)
+
+Pay attention to BOTH additions and deletions. A deletion that removes important validation or error handling is a critical issue too.
 
 Ignore: style, minor optimizations, naming, comments, anything non-critical.
 Do NOT suggest adding try-catch or null checks where a failure would correctly surface a real bug.
@@ -89,20 +95,19 @@ Respond in JSON:
 
 If no CRITICAL issues, return empty critical array.`;
 
-  const response = await getClient().messages.create({
+  const response = await client.models.generateContent({
     model,
-    max_tokens: 800,
-    messages: [{ role: 'user', content: prompt }]
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+      maxOutputTokens: 4000,
+    },
   });
 
-  const text = response.content[0].type === 'text' ? response.content[0].text : '';
-  
+  const text = response.text || '';
+
   try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return defaultReview();
-    }
-    const parsed = JSON.parse(jsonMatch[0]);
+    const parsed = JSON.parse(text);
     const isTestOrConfig = parsed.isTestOrConfig === true;
     return {
       language: parsed.language || 'Unknown',
@@ -127,10 +132,11 @@ function defaultReview(): AIReview {
  * Reply to a user's question about a code review comment
  */
 export async function replyToComment(
+  client: GoogleGenAI,
   question: string,
   originalComment: string,
   codeContext: string,
-  model: string = 'claude-sonnet-4-20250514'
+  model: string = DEFAULT_MODEL
 ): Promise<string> {
   const prompt = `You are ReviewPal, an AI code review assistant. A user is asking a follow-up question about your previous code review comment.
 
@@ -149,12 +155,13 @@ Provide a helpful, concise response to their question. Be friendly and education
 
 Keep your response under 500 words. Use markdown formatting for code snippets.`;
 
-  const response = await getClient().messages.create({
+  const response = await client.models.generateContent({
     model,
-    max_tokens: 1000,
-    messages: [{ role: 'user', content: prompt }]
+    contents: prompt,
+    config: {
+      maxOutputTokens: 1000,
+    },
   });
 
-  const text = response.content[0].type === 'text' ? response.content[0].text : '';
-  return text || 'I apologize, but I was unable to generate a response. Please try rephrasing your question.';
+  return response.text || 'I apologize, but I was unable to generate a response. Please try rephrasing your question.';
 }

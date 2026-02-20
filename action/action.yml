@@ -7,21 +7,29 @@ branding:
   color: 'purple'
 
 inputs:
-  anthropic_api_key:
-    description: 'Anthropic API key for Claude analysis (optional - static analysis works without it)'
-    required: false
+  gemini_api_key:
+    description: 'Google Gemini API key (REQUIRED)'
+    required: true
   github_token:
     description: 'GitHub token for posting comments (defaults to GITHUB_TOKEN)'
     required: false
     default: ${{ github.token }}
   model:
-    description: 'Claude model to use (if API key provided)'
+    description: 'Gemini model to use'
     required: false
-    default: 'claude-sonnet-4-20250514'
+    default: 'gemini-2.5-pro'
   max_hunks:
-    description: 'Maximum number of hunks to analyze'
+    description: 'Maximum number of hunks to analyze (legacy mode only)'
     required: false
     default: '20'
+  max_api_calls:
+    description: 'Maximum API calls for triage pipeline (1 triage + N-1 deep reviews)'
+    required: false
+    default: '10'
+  legacy_mode:
+    description: 'Use legacy per-hunk analysis instead of triage pipeline'
+    required: false
+    default: 'false'
   skip_summary:
     description: 'Skip "What Changed & Why" analysis (requires API)'
     required: false
@@ -111,40 +119,39 @@ runs:
       shell: bash
       id: analyze
       env:
-        ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+        GEMINI_API_KEY: ${{ inputs.gemini_api_key }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        GH_TOKEN: ${{ inputs.github_token }}
+        GITHUB_WORKSPACE: ${{ github.workspace }}
       run: |
         cd ${{ github.action_path }}/..
-        
-        # Build options
-        OPTIONS=""
-        if [ "${{ inputs.skip_summary }}" = "true" ] || [ -z "${{ inputs.anthropic_api_key }}" ]; then
-          OPTIONS="$OPTIONS --no-summary"
+
+        # Build pipeline options
+        PIPELINE_OPTS=""
+        if [ "${{ inputs.legacy_mode }}" = "true" ]; then
+          PIPELINE_OPTS="$PIPELINE_OPTS --legacy --max-hunks ${{ inputs.max_hunks }}"
+        else
+          PIPELINE_OPTS="$PIPELINE_OPTS --max-api-calls ${{ inputs.max_api_calls }}"
         fi
-        if [ "${{ inputs.skip_patterns }}" = "true" ]; then
-          OPTIONS="$OPTIONS --no-patterns"
-        fi
-        if [ "${{ inputs.skip_complexity }}" = "true" ]; then
-          OPTIONS="$OPTIONS --no-complexity"
-        fi
-        
+
         # Run analysis with friendly format
         node dist/index.js ${{ steps.diff.outputs.diff_file }} \
           --format ${{ inputs.format }} \
-          --max-hunks ${{ inputs.max_hunks }} \
+          --repo-root "$GITHUB_WORKSPACE" \
           --model ${{ inputs.model }} \
-          $OPTIONS > /tmp/analysis.md 2>&1 || true
-        
+          $PIPELINE_OPTS > /tmp/analysis.md 2>&1 || true
+
         # Export for outputs
         echo "analysis_markdown<<EOF" >> $GITHUB_OUTPUT
         cat /tmp/analysis.md >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
-        
+
         # Also run JSON for structured data
         node dist/index.js ${{ steps.diff.outputs.diff_file }} \
           --format json \
-          --max-hunks ${{ inputs.max_hunks }} \
+          --repo-root "$GITHUB_WORKSPACE" \
           --model ${{ inputs.model }} \
-          $OPTIONS > /tmp/analysis.json 2>&1 || echo '{"files":[],"totalHunks":0,"aiCodeLikelihood":"low"}' > /tmp/analysis.json
+          $PIPELINE_OPTS > /tmp/analysis.json 2>&1 || echo '{"files":[],"totalHunks":0,"aiCodeLikelihood":"low"}' > /tmp/analysis.json
         
         # Extract key metrics safely
         echo "total_files=$(jq '.files | length // 0' /tmp/analysis.json)" >> $GITHUB_OUTPUT
