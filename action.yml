@@ -174,9 +174,11 @@ runs:
             }
           }
           
-          // Get PR summary from first file's first hunk
+          // Get PR summary (v3 triage result or legacy first hunk)
           let prSummary = '';
-          if (analysisJson.files && analysisJson.files[0] && 
+          if (analysisJson.triage && analysisJson.triage.prSummary) {
+            prSummary = analysisJson.triage.prSummary;
+          } else if (analysisJson.files && analysisJson.files[0] &&
               analysisJson.files[0].hunks && analysisJson.files[0].hunks[0] &&
               analysisJson.files[0].hunks[0].aiReview) {
             prSummary = analysisJson.files[0].hunks[0].aiReview.summary || '';
@@ -254,50 +256,55 @@ runs:
             }
           }
           
-          if (commentLinks.length === 0) {
-            console.log('No comments posted');
-            return;
-          }
-          
-          // Build summary with numbered links to comments
-          const issuesByType = {};
-          let counter = 1;
-          
-          for (const item of commentLinks) {
-            if (!issuesByType[item.type]) issuesByType[item.type] = [];
-            issuesByType[item.type].push({
-              num: counter++,
-              url: item.url,
-              file: item.file,
-              line: item.line
-            });
-          }
-          
+          // Build summary
           let summary = '';
-          
+
           // Add PR summary with styling
           if (prSummary) {
             summary += `## 📋 What is this PR about\n\n`;
             summary += `${prSummary}\n\n`;
             summary += `---\n\n`;
           }
-          
-          summary += `## 💡 Suggestions\n\n`;
-          summary += `| Category | Count | Details |\n`;
-          summary += `|----------|-------|----------|\n`;
-          
-          // Sort by severity: security > crash > data-loss > performance
-          const severityOrder = ['security', 'crash', 'data-loss', 'performance'];
-          const sortedTypes = Object.keys(issuesByType).sort((a, b) => {
-            return severityOrder.indexOf(a) - severityOrder.indexOf(b);
-          });
-          
-          for (const type of sortedTypes) {
-            const items = issuesByType[type];
-            const emoji = EMOJI_MAP[type] || '⚠️';
-            const links = items.map(i => `[${i.num}](${i.url})`).join(' ');
-            const typeLabel = type.toUpperCase().replace('-', ' ');
-            summary += `| ${emoji} **${typeLabel}** | ${items.length} | ${links} |\n`;
+
+          if (commentLinks.length > 0) {
+            // Build summary with numbered links to inline comments
+            const issuesByType = {};
+            let counter = 1;
+
+            for (const item of commentLinks) {
+              if (!issuesByType[item.type]) issuesByType[item.type] = [];
+              issuesByType[item.type].push({
+                num: counter++,
+                url: item.url,
+                file: item.file,
+                line: item.line
+              });
+            }
+
+            summary += `## 💡 Suggestions\n\n`;
+            summary += `| Category | Count | Details |\n`;
+            summary += `|----------|-------|----------|\n`;
+
+            const severityOrder = ['security', 'crash', 'data-loss', 'performance'];
+            const sortedTypes = Object.keys(issuesByType).sort((a, b) => {
+              return severityOrder.indexOf(a) - severityOrder.indexOf(b);
+            });
+
+            for (const type of sortedTypes) {
+              const items = issuesByType[type];
+              const emoji = EMOJI_MAP[type] || '⚠️';
+              const links = items.map(i => `[${i.num}](${i.url})`).join(' ');
+              const typeLabel = type.toUpperCase().replace('-', ' ');
+              summary += `| ${emoji} **${typeLabel}** | ${items.length} | ${links} |\n`;
+            }
+          } else {
+            // Inline comments failed, list issues directly in summary
+            summary += `## 💡 Suggestions\n\n`;
+            for (const item of allIssues) {
+              const emoji = EMOJI_MAP[item.type] || '⚠️';
+              summary += `${emoji} **${item.type.toUpperCase()}** in \`${item.file}:${item.line}\`\n`;
+              summary += `> ${item.friendlySuggestion}\n\n`;
+            }
           }
           
           // Post or update summary comment
