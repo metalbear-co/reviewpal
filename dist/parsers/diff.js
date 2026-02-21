@@ -4,10 +4,6 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.parseDiff = parseDiff;
-exports.extractContext = extractContext;
-exports.isTypeScriptFile = isTypeScriptFile;
-exports.isTestFile = isTestFile;
-exports.quickAiCheck = quickAiCheck;
 const crypto_1 = require("crypto");
 /**
  * Parse a unified diff string into structured data
@@ -119,67 +115,7 @@ function convertHunk(raw, filename) {
         content: contentLines.join('\n'),
         additions,
         deletions,
-        context: '' // Will be filled later if we have file access
+        context: ''
     };
-}
-/**
- * Get context around a hunk (surrounding code)
- */
-function extractContext(fileContent, startLine, endLine, contextLines = 50) {
-    const lines = fileContent.split('\n');
-    const contextStart = Math.max(0, startLine - contextLines - 1);
-    const contextEnd = Math.min(lines.length, endLine + contextLines);
-    return lines.slice(contextStart, contextEnd).join('\n');
-}
-/**
- * Check if a file is likely TypeScript/JavaScript/React
- */
-function isTypeScriptFile(filename) {
-    return /\.(tsx?|jsx?)$/.test(filename);
-}
-/**
- * Check if a file is a test file
- */
-function isTestFile(filename) {
-    return /\.(test|spec)\.(tsx?|jsx?)$/.test(filename) ||
-        filename.includes('__tests__') ||
-        filename.includes('__mocks__');
-}
-/**
- * Estimate if code is likely AI-generated based on patterns
- * This is a quick heuristic, not a definitive check
- */
-function quickAiCheck(content) {
-    let score = 0;
-    // Check for AI-typical patterns
-    const patterns = [
-        /\/\*\*[\s\S]*?\*\//g, // JSDoc blocks
-        /\/\/\s+[A-Z][a-z]+.*$/gm, // Sentence-case comments
-        /try\s*\{[\s\S]*?\}\s*catch\s*\([^)]*\)\s*\{[\s\S]*?console\.(log|error)/g, // Generic catch
-        /function\s+\w{20,}/g, // Very long function names
-        /const\s+\w{20,}/g, // Very long variable names
-        /import\s+[\s\S]*?from\s+['"][^'"]+['"];?\s*\n/g // Many import lines
-    ];
-    for (const pattern of patterns) {
-        const matches = content.match(pattern);
-        if (matches && matches.length > 2) {
-            score++;
-        }
-    }
-    // Check comment density (AI tends to over-comment)
-    const lines = content.split('\n');
-    const commentLines = lines.filter(l => l.trim().startsWith('//') ||
-        l.trim().startsWith('/*') ||
-        l.trim().startsWith('*')).length;
-    const commentRatio = commentLines / lines.length;
-    if (commentRatio > 0.3)
-        score += 2;
-    else if (commentRatio > 0.2)
-        score += 1;
-    if (score >= 4)
-        return 'high';
-    if (score >= 2)
-        return 'medium';
-    return 'low';
 }
 //# sourceMappingURL=diff.js.map

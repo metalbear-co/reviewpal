@@ -25,7 +25,7 @@ const triage_js_1 = require("./pipeline/triage.js");
 const deep_review_js_1 = require("./pipeline/deep-review.js");
 const adversarial_js_1 = require("./pipeline/adversarial.js");
 const verdict_js_1 = require("./pipeline/verdict.js");
-const VERSION = '3.0.0';
+const VERSION = '3.1.0';
 const DEFAULT_MODEL = 'gemini-2.5-pro';
 async function main() {
     const program = new commander_1.Command();
@@ -36,11 +36,9 @@ async function main() {
         .argument('[input]', 'Diff file, git range, or - for stdin')
         .option('-g, --git <range>', 'Use git diff for the specified range')
         .option('-f, --format <type>', 'Output format: friendly, json', 'friendly')
-        .option('-m, --max-hunks <n>', 'Maximum hunks to analyze (legacy mode)', '20')
-        .option('--max-api-calls <n>', 'Maximum API calls for triage pipeline', '10')
+        .option('--max-api-calls <n>', 'Maximum API calls (1 triage + N deep reviews + 3 adversarial)', '10')
         .option('--model <name>', 'Gemini model to use', DEFAULT_MODEL)
         .option('--repo-root <path>', 'Repository root for loading CLAUDE.md and .reviewpal.yml')
-        .option('--legacy', 'Use legacy per-hunk analysis instead of triage pipeline')
         .option('-q, --quiet', 'Minimal output')
         .action(runReview);
     await program.parseAsync(process.argv);
@@ -102,68 +100,59 @@ async function runReview(input, options) {
             }
         }
         const startTime = Date.now();
-        let result;
-        if (options.legacy) {
-            // Legacy mode: per-hunk analysis (backward compatible)
-            result = await runLegacyPipeline(client, filesToAnalyze, options, architectureContext, spinner);
+        const maxApiCalls = parseInt(options.maxApiCalls, 10) || config.max_api_calls;
+        // Triage
+        spinner.start('Triaging PR changes...');
+        const triageResult = await (0, triage_js_1.triagePR)(client, filesToAnalyze, architectureContext, config, options.model);
+        spinner.succeed(`Triage complete: ${triageResult.highPriorityFiles.length} files prioritized`);
+        if (triageResult.crossSystemImplications.length > 0) {
+            spinner.info(`Found ${triageResult.crossSystemImplications.length} cross-system implication(s)`);
         }
-        else {
-            // New triage pipeline
-            const maxApiCalls = parseInt(options.maxApiCalls, 10) || config.max_api_calls;
-            spinner.start('Triaging PR changes...');
-            const triageResult = await (0, triage_js_1.triagePR)(client, filesToAnalyze, architectureContext, config, options.model);
-            spinner.succeed(`Triage complete: ${triageResult.highPriorityFiles.length} files prioritized`);
-            if (triageResult.crossSystemImplications.length > 0) {
-                spinner.info(`Found ${triageResult.crossSystemImplications.length} cross-system implication(s)`);
-            }
-            // Run deep review and adversarial passes in parallel
-            spinner.start(`Deep reviewing ${Math.min(triageResult.highPriorityFiles.length, maxApiCalls - 1)} files + adversarial passes...`);
-            // Budget: reserve 3 calls for adversarial (one per persona), rest for deep review
-            const adversarialBudget = 3;
-            const deepBudget = Math.max(1, maxApiCalls - adversarialBudget);
-            const [deepReviews, adversarialFindings] = await Promise.all([
-                (0, deep_review_js_1.reviewPrioritizedFiles)(client, filesToAnalyze, triageResult, architectureContext, config, options.model, deepBudget),
-                (0, adversarial_js_1.runAdversarialReview)(client, filesToAnalyze, triageResult, architectureContext, lessonsContext, config, options.model, adversarialBudget),
-            ]);
-            spinner.succeed(`Review complete (${deepReviews.length} files deep-reviewed, ${adversarialFindings.length} adversarial findings)`);
-            // Compute verdict
-            const verdict = (0, verdict_js_1.computeVerdict)(deepReviews, adversarialFindings);
-            const verdictEmoji = verdict.verdict === 'BLOCK' ? '🔴' : verdict.verdict === 'WARN' ? '🟡' : '🟢';
-            spinner.info(`Verdict: ${verdictEmoji} ${verdict.verdict} - ${verdict.reason}`);
-            // Build ReviewResult for backward-compatible formatting
-            const fileAnalyses = deepReviews.map(dr => ({
-                filename: dr.filename,
-                hunks: [{
-                        hunk: {
-                            filename: dr.filename,
-                            fileDiffHash: parsed.files.find(f => f.filename === dr.filename)?.hunks[0]?.fileDiffHash,
-                            startLine: parsed.files.find(f => f.filename === dr.filename)?.hunks[0]?.startLine || 1,
-                            endLine: parsed.files.find(f => f.filename === dr.filename)?.hunks[0]?.endLine || 1,
-                            content: '',
-                            additions: [],
-                            deletions: [],
-                            context: '',
-                        },
-                        aiReview: {
-                            summary: dr.summary,
-                            critical: dr.critical,
-                            language: dr.language,
-                        },
-                        processingTime: 0,
-                    }],
-                overallComplexity: 0,
-            }));
-            result = {
-                files: fileAnalyses,
-                totalHunks: totalHunks,
-                totalProcessingTime: Date.now() - startTime,
-                aiCodeLikelihood: 'medium',
-                triage: triageResult,
-                deepReviews,
-                adversarialFindings,
-                verdict,
-            };
-        }
+        // Run deep review and adversarial passes in parallel
+        const adversarialBudget = 3;
+        const deepBudget = Math.max(1, maxApiCalls - adversarialBudget);
+        spinner.start(`Deep reviewing ${Math.min(triageResult.highPriorityFiles.length, deepBudget)} files + adversarial passes...`);
+        const [deepReviews, adversarialFindings] = await Promise.all([
+            (0, deep_review_js_1.reviewPrioritizedFiles)(client, filesToAnalyze, triageResult, architectureContext, config, options.model, deepBudget),
+            (0, adversarial_js_1.runAdversarialReview)(client, filesToAnalyze, triageResult, architectureContext, lessonsContext, config, options.model, adversarialBudget),
+        ]);
+        spinner.succeed(`Review complete (${deepReviews.length} files deep-reviewed, ${adversarialFindings.length} adversarial findings)`);
+        // Compute verdict
+        const verdict = (0, verdict_js_1.computeVerdict)(deepReviews, adversarialFindings);
+        const verdictEmoji = verdict.verdict === 'BLOCK' ? '🔴' : verdict.verdict === 'WARN' ? '🟡' : '🟢';
+        spinner.info(`Verdict: ${verdictEmoji} ${verdict.verdict} - ${verdict.reason}`);
+        // Build ReviewResult
+        const fileAnalyses = deepReviews.map(dr => ({
+            filename: dr.filename,
+            hunks: [{
+                    hunk: {
+                        filename: dr.filename,
+                        fileDiffHash: parsed.files.find(f => f.filename === dr.filename)?.hunks[0]?.fileDiffHash,
+                        startLine: parsed.files.find(f => f.filename === dr.filename)?.hunks[0]?.startLine || 1,
+                        endLine: parsed.files.find(f => f.filename === dr.filename)?.hunks[0]?.endLine || 1,
+                        content: '',
+                        additions: [],
+                        deletions: [],
+                        context: '',
+                    },
+                    aiReview: {
+                        summary: dr.summary,
+                        critical: dr.critical,
+                        language: dr.language,
+                    },
+                    processingTime: 0,
+                }],
+            overallComplexity: 0,
+        }));
+        const result = {
+            files: fileAnalyses,
+            totalHunks: totalHunks,
+            totalProcessingTime: Date.now() - startTime,
+            triage: triageResult,
+            deepReviews,
+            adversarialFindings,
+            verdict,
+        };
         result.totalProcessingTime = Date.now() - startTime;
         spinner.succeed(`Analysis complete (${(result.totalProcessingTime / 1000).toFixed(1)}s)`);
         // Format and output
@@ -175,49 +164,6 @@ async function runReview(input, options) {
         console.error(chalk_1.default.red(error instanceof Error ? error.message : String(error)));
         process.exit(1);
     }
-}
-/**
- * Legacy per-hunk analysis pipeline (backward compatible)
- */
-async function runLegacyPipeline(client, files, options, architectureContext, spinner) {
-    const maxHunks = parseInt(options.maxHunks, 10);
-    const startTime = Date.now();
-    const fileAnalyses = [];
-    let processedHunks = 0;
-    for (const file of files) {
-        const hunkAnalyses = [];
-        for (const hunk of file.hunks.slice(0, maxHunks - processedHunks)) {
-            if (processedHunks >= maxHunks)
-                break;
-            spinner.start(`Analyzing ${file.filename}:${hunk.startLine}...`);
-            const analysis = await analyzeHunk(client, hunk, file.filename, options.model, architectureContext);
-            hunkAnalyses.push(analysis);
-            processedHunks++;
-        }
-        fileAnalyses.push({
-            filename: file.filename,
-            hunks: hunkAnalyses,
-            overallComplexity: 0
-        });
-    }
-    return {
-        files: fileAnalyses,
-        totalHunks: processedHunks,
-        totalProcessingTime: Date.now() - startTime,
-        aiCodeLikelihood: 'medium'
-    };
-}
-/**
- * Analyze a single hunk with AI (legacy mode, sends full unified diff)
- */
-async function analyzeHunk(client, hunk, filename, model, architectureContext) {
-    const startTime = Date.now();
-    const review = await (0, gemini_js_1.reviewCode)(client, hunk.content, filename, model, architectureContext);
-    return {
-        hunk,
-        aiReview: review,
-        processingTime: Date.now() - startTime
-    };
 }
 /**
  * Get diff content from various sources

@@ -1,5 +1,5 @@
 /**
- * Core types for AI Review Helper
+ * Core types for ReviewPal
  */
 export interface DiffHunk {
     filename: string;
@@ -20,42 +20,6 @@ export interface DiffFile {
     additions: number;
     deletions: number;
 }
-export interface SummaryAnalysis {
-    what: string;
-    why: string;
-    watch: string[];
-}
-export interface PatternMatch {
-    type: PatternType;
-    lines: number[];
-    issue: string;
-    simplerAlternative?: string;
-}
-export type PatternType = 'over-defensive' | 'verbose-comments' | 'over-abstraction' | 'naming-chaos' | 'import-bloat' | 'monolithic-function' | 'catch-all-error';
-export interface PatternAnalysis {
-    patternsFound: PatternMatch[];
-    overallAiLikelihood: 'high' | 'medium' | 'low';
-    keyQuestion?: string;
-}
-export interface ComplexityMetrics {
-    nestingDepth: number;
-    cyclomaticComplexity: number;
-    parameterCount: number;
-    lineCount: number;
-    dependencyCount: number;
-}
-export interface ComplexityAnalysis {
-    score: number;
-    metrics: ComplexityMetrics;
-    flags: ComplexityFlag[];
-    suggestions: string[];
-}
-export interface ComplexityFlag {
-    metric: keyof ComplexityMetrics;
-    value: number;
-    threshold: number;
-    severity: 'warning' | 'critical';
-}
 export interface AIReview {
     summary: string;
     critical: Array<{
@@ -69,9 +33,6 @@ export interface AIReview {
 export interface HunkAnalysis {
     hunk: DiffHunk;
     aiReview?: AIReview;
-    summary?: SummaryAnalysis;
-    patterns?: PatternAnalysis;
-    complexity?: ComplexityAnalysis;
     processingTime: number;
 }
 export interface TriageResult {
@@ -115,7 +76,6 @@ export interface ReviewResult {
     files: FileAnalysis[];
     totalHunks: number;
     totalProcessingTime: number;
-    aiCodeLikelihood: 'high' | 'medium' | 'low';
     triage?: TriageResult;
     deepReviews?: DeepReviewResult[];
     adversarialFindings?: AdversarialFinding[];
@@ -126,33 +86,5 @@ export interface FileAnalysis {
     hunks: HunkAnalysis[];
     overallComplexity: number;
 }
-export interface ReviewOptions {
-    input: string;
-    format: OutputFormat;
-    verbose: boolean;
-    skipSummary: boolean;
-    skipPatterns: boolean;
-    skipComplexity: boolean;
-    maxHunks: number;
-    contextLines: number;
-}
-export type OutputFormat = 'markdown' | 'json' | 'text' | 'github' | 'friendly';
-export interface Config {
-    geminiApiKey?: string;
-    model: string;
-    complexityThresholds: ComplexityThresholds;
-    enabledAnalyzers: {
-        summary: boolean;
-        patterns: boolean;
-        complexity: boolean;
-    };
-}
-export interface ComplexityThresholds {
-    nestingDepth: number;
-    cyclomaticComplexity: number;
-    parameterCount: number;
-    lineCount: number;
-    dependencyCount: number;
-}
-export declare const DEFAULT_CONFIG: Config;
+export type OutputFormat = 'friendly' | 'json';
 //# sourceMappingURL=types.d.ts.map
