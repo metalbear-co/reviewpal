@@ -21,6 +21,8 @@ import { formatFriendlyReviewResult } from './formatters/friendly.js';
 import { loadArchitectureContext } from './pipeline/context.js';
 import { triagePR } from './pipeline/triage.js';
 import { reviewPrioritizedFiles } from './pipeline/deep-review.js';
+import { runAdversarialReview } from './pipeline/adversarial.js';
+import { computeVerdict } from './pipeline/verdict.js';
 import {
   DiffHunk,
   HunkAnalysis,
@@ -107,13 +109,16 @@ async function runReview(
 
     // Load architecture context
     spinner.start('Loading project context...');
-    const { architectureContext, config } = loadArchitectureContext(
+    const { architectureContext, lessonsContext, config } = loadArchitectureContext(
       options.repoRoot || process.env.GITHUB_WORKSPACE || process.cwd()
     );
     if (architectureContext) {
       spinner.succeed('Loaded project context');
     } else {
       spinner.info('No CLAUDE.md or .reviewpal.yml found (continuing without project context)');
+    }
+    if (lessonsContext) {
+      spinner.info('Loaded lessons from .reviewpal-lessons.md');
     }
 
     // Apply skip_patterns from config
@@ -150,11 +155,28 @@ async function runReview(
         );
       }
 
-      spinner.start(`Deep reviewing ${Math.min(triageResult.highPriorityFiles.length, maxApiCalls - 1)} files...`);
-      const deepReviews = await reviewPrioritizedFiles(
-        client, filesToAnalyze, triageResult, architectureContext, config, options.model, maxApiCalls
-      );
-      spinner.succeed(`Deep review complete (${deepReviews.length} files reviewed)`);
+      // Run deep review and adversarial passes in parallel
+      spinner.start(`Deep reviewing ${Math.min(triageResult.highPriorityFiles.length, maxApiCalls - 1)} files + adversarial passes...`);
+
+      // Budget: reserve 3 calls for adversarial (one per persona), rest for deep review
+      const adversarialBudget = 3;
+      const deepBudget = Math.max(1, maxApiCalls - adversarialBudget);
+
+      const [deepReviews, adversarialFindings] = await Promise.all([
+        reviewPrioritizedFiles(
+          client, filesToAnalyze, triageResult, architectureContext, config, options.model, deepBudget
+        ),
+        runAdversarialReview(
+          client, filesToAnalyze, triageResult, architectureContext, lessonsContext, config, options.model, adversarialBudget
+        ),
+      ]);
+
+      spinner.succeed(`Review complete (${deepReviews.length} files deep-reviewed, ${adversarialFindings.length} adversarial findings)`);
+
+      // Compute verdict
+      const verdict = computeVerdict(deepReviews, adversarialFindings);
+      const verdictEmoji = verdict.verdict === 'BLOCK' ? '🔴' : verdict.verdict === 'WARN' ? '🟡' : '🟢';
+      spinner.info(`Verdict: ${verdictEmoji} ${verdict.verdict} - ${verdict.reason}`);
 
       // Build ReviewResult for backward-compatible formatting
       const fileAnalyses: FileAnalysis[] = deepReviews.map(dr => ({
@@ -187,6 +209,8 @@ async function runReview(
         aiCodeLikelihood: 'medium',
         triage: triageResult,
         deepReviews,
+        adversarialFindings,
+        verdict,
       };
     }
 

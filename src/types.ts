@@ -125,15 +125,36 @@ export interface DeepReviewResult {
   language: string;
 }
 
+export interface AdversarialFinding {
+  persona: string;
+  filename: string;
+  type: 'security' | 'crash' | 'data-loss' | 'performance' | 'regression' | 'logic';
+  line: number;
+  issue: string;
+  friendlySuggestion: string;
+}
+
+export type Verdict = 'BLOCK' | 'WARN' | 'CLEAR';
+
+export interface VerdictResult {
+  verdict: Verdict;
+  reason: string;
+  criticalCount: number;
+  warningCount: number;
+}
+
 // Full review result
 export interface ReviewResult {
   files: FileAnalysis[];
   totalHunks: number;
   totalProcessingTime: number;
   aiCodeLikelihood: 'high' | 'medium' | 'low';
-  // New triage pipeline fields
+  // Triage pipeline fields
   triage?: TriageResult;
   deepReviews?: DeepReviewResult[];
+  // Adversarial review + verdict
+  adversarialFindings?: AdversarialFinding[];
+  verdict?: VerdictResult;
 }
 
 export interface FileAnalysis {

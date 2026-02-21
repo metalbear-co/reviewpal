@@ -9,7 +9,14 @@ const EMOJI_MAP = {
     security: '🔒',
     crash: '💥',
     'data-loss': '🗑️',
-    performance: '🐌'
+    performance: '🐌',
+    regression: '🔄',
+    logic: '🧩'
+};
+const VERDICT_EMOJI = {
+    BLOCK: '🔴',
+    WARN: '🟡',
+    CLEAR: '🟢',
 };
 function formatFriendlyReviewResult(result) {
     // Use new triage-based format if triage data is available
@@ -28,6 +35,12 @@ function formatTriageResult(result) {
     // Get PR context from environment (set by GitHub Action)
     const repo = process.env.GITHUB_REPOSITORY || '';
     const prNumber = process.env.PR_NUMBER || '';
+    // Verdict (if present)
+    if (result.verdict) {
+        const emoji = VERDICT_EMOJI[result.verdict.verdict] || '⚪';
+        parts.push(`## ${emoji} Verdict: ${result.verdict.verdict}\n`);
+        parts.push(`> ${result.verdict.reason}\n`);
+    }
     // PR Summary
     parts.push(`**What does this PR do?** ${triage.prSummary}\n`);
     if (triage.themes.length > 0) {
@@ -69,6 +82,21 @@ function formatTriageResult(result) {
             }
         }
     }
+    // Adversarial findings
+    if (result.adversarialFindings && result.adversarialFindings.length > 0) {
+        parts.push(`\n**🎭 Adversarial Review Findings:**\n`);
+        for (const finding of result.adversarialFindings) {
+            const emoji = EMOJI_MAP[finding.type] || '⚠️';
+            const fileData = result.files.find(f => f.filename === finding.filename);
+            const fileDiffHash = fileData?.hunks[0]?.hunk?.fileDiffHash;
+            let lineLink = `line ${finding.line}`;
+            if (repo && prNumber && fileDiffHash) {
+                const diffUrl = `https://github.com/${repo}/pull/${prNumber}/files#diff-${fileDiffHash}R${finding.line}`;
+                lineLink = `[${finding.filename}:${finding.line}](${diffUrl})`;
+            }
+            parts.push(`- ${emoji} **${finding.type.toUpperCase()}** *(${finding.persona})*: ${finding.issue} → ${lineLink}\n`);
+        }
+    }
     // Files reviewed summary
     if (result.deepReviews && result.deepReviews.length > 0) {
         const skipped = result.totalHunks - (result.deepReviews.length || 0);
@@ -76,11 +104,10 @@ function formatTriageResult(result) {
             parts.push(`\n*Reviewed ${result.deepReviews.length} priority files out of ${result.files.length + skipped} total.*\n`);
         }
     }
-    if (parts.length <= 1) {
-        return parts.join('\n') + '\n\n✅ No critical issues found!';
-    }
-    if (!hasCriticalIssues) {
-        return parts.join('\n') + '\n\n✅ No critical issues found!';
+    if (!hasCriticalIssues && (!result.adversarialFindings || result.adversarialFindings.length === 0)) {
+        if (!result.verdict || result.verdict.verdict === 'CLEAR') {
+            return parts.join('\n') + '\n\n✅ No critical issues found!';
+        }
     }
     return parts.join('\n');
 }

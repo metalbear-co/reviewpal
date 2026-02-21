@@ -152,7 +152,15 @@ runs:
             security: '🔒',
             crash: '💥',
             'data-loss': '🗑️',
-            performance: '🐌'
+            performance: '🐌',
+            regression: '🔄',
+            logic: '🧩'
+          };
+
+          const VERDICT_EMOJI = {
+            BLOCK: '🔴',
+            WARN: '🟡',
+            CLEAR: '🟢'
           };
 
           // Parse the diff to find valid line numbers per file (lines visible in the diff)
@@ -202,7 +210,7 @@ runs:
             return best;
           }
 
-          // Collect all critical issues
+          // Collect all critical issues from deep reviews and legacy hunks
           const allIssues = [];
           for (const file of analysisJson.files || []) {
             for (const hunk of file.hunks || []) {
@@ -214,12 +222,30 @@ runs:
                     type: issue.type,
                     issue: issue.issue,
                     diffHash: hunk.hunk.fileDiffHash,
-                    friendlySuggestion: issue.friendlySuggestion || issue.issue
+                    friendlySuggestion: issue.friendlySuggestion || issue.issue,
+                    source: 'deep-review'
                   });
                 }
               }
             }
           }
+
+          // Collect adversarial findings
+          const adversarialFindings = analysisJson.adversarialFindings || [];
+          for (const finding of adversarialFindings) {
+            allIssues.push({
+              file: finding.filename,
+              line: finding.line,
+              type: finding.type,
+              issue: finding.issue,
+              friendlySuggestion: finding.friendlySuggestion || finding.issue,
+              source: 'adversarial',
+              persona: finding.persona
+            });
+          }
+
+          // Get verdict
+          const verdict = analysisJson.verdict || null;
           
           // Get PR summary (v3 triage result or legacy first hunk)
           let prSummary = '';
@@ -232,14 +258,21 @@ runs:
           }
           
           if (allIssues.length === 0) {
-            // Post "no issues" message
+            // Post "no issues" message with verdict
             const marker = '<!-- reviewpal -->';
             let noIssuesMsg = `${marker}\n\n`;
-            
+
+            // Show verdict at top
+            if (verdict) {
+              const vEmoji = VERDICT_EMOJI[verdict.verdict] || '⚪';
+              noIssuesMsg += `## ${vEmoji} Verdict: ${verdict.verdict}\n\n`;
+              noIssuesMsg += `> ${verdict.reason}\n\n---\n\n`;
+            }
+
             if (prSummary) {
               noIssuesMsg += `## 📋 What is this PR about\n\n${prSummary}\n\n---\n\n`;
             }
-            
+
             noIssuesMsg += `✅ **No critical issues found**`;
             
             // Check for existing comment
@@ -309,11 +342,16 @@ runs:
               console.log(`Snapped ${item.file}:${item.line} -> ${diffLine} (nearest diff line)`);
             }
             try {
+              let commentBody = `${EMOJI_MAP[item.type] || '⚠️'} **${item.type.toUpperCase()}**: ${item.friendlySuggestion}`;
+              if (item.source === 'adversarial' && item.persona) {
+                commentBody += `\n\n_Found by ${item.persona}_`;
+              }
+
               const comment = await github.rest.pulls.createReviewComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 pull_number: context.issue.number,
-                body: `${EMOJI_MAP[item.type] || '⚠️'} **${item.type.toUpperCase()}**: ${item.friendlySuggestion}`,
+                body: commentBody,
                 commit_id: headSha,
                 path: item.file,
                 line: diffLine,
@@ -337,6 +375,13 @@ runs:
           
           // Build summary
           let summary = '';
+
+          // Show verdict at top
+          if (verdict) {
+            const vEmoji = VERDICT_EMOJI[verdict.verdict] || '⚪';
+            summary += `## ${vEmoji} Verdict: ${verdict.verdict}\n\n`;
+            summary += `> ${verdict.reason}\n\n---\n\n`;
+          }
 
           // Add PR summary with styling
           if (prSummary) {
@@ -364,7 +409,7 @@ runs:
             summary += `| Category | Count | Details |\n`;
             summary += `|----------|-------|----------|\n`;
 
-            const severityOrder = ['security', 'crash', 'data-loss', 'performance'];
+            const severityOrder = ['security', 'crash', 'data-loss', 'performance', 'regression', 'logic'];
             const sortedTypes = Object.keys(issuesByType).sort((a, b) => {
               return severityOrder.indexOf(a) - severityOrder.indexOf(b);
             });

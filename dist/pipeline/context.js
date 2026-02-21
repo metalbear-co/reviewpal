@@ -87,6 +87,13 @@ function loadArchitectureContext(repoRoot) {
             // Ignore invalid yaml
         }
     }
+    // Load lessons file (.reviewpal-lessons.md)
+    let lessonsContext = '';
+    const lessonsPath = (0, path_1.join)(root, '.reviewpal-lessons.md');
+    if ((0, fs_1.existsSync)(lessonsPath)) {
+        const content = (0, fs_1.readFileSync)(lessonsPath, 'utf-8');
+        lessonsContext = truncateAtSectionBoundary(content, 3000);
+    }
     // Load local CLAUDE.md
     const claudeMdPath = (0, path_1.join)(root, 'CLAUDE.md');
     if ((0, fs_1.existsSync)(claudeMdPath)) {
@@ -140,6 +147,7 @@ function loadArchitectureContext(repoRoot) {
     }
     return {
         architectureContext: contextParts.join('\n\n'),
+        lessonsContext,
         config,
     };
 }

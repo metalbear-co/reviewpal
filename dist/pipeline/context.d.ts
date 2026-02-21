@@ -13,6 +13,7 @@ export interface ReviewPalConfig {
 }
 export interface ArchitectureContext {
     architectureContext: string;
+    lessonsContext: string;
     config: ReviewPalConfig;
 }
 /**

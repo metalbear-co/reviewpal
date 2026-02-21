@@ -96,6 +96,21 @@ export interface DeepReviewResult {
     }>;
     language: string;
 }
+export interface AdversarialFinding {
+    persona: string;
+    filename: string;
+    type: 'security' | 'crash' | 'data-loss' | 'performance' | 'regression' | 'logic';
+    line: number;
+    issue: string;
+    friendlySuggestion: string;
+}
+export type Verdict = 'BLOCK' | 'WARN' | 'CLEAR';
+export interface VerdictResult {
+    verdict: Verdict;
+    reason: string;
+    criticalCount: number;
+    warningCount: number;
+}
 export interface ReviewResult {
     files: FileAnalysis[];
     totalHunks: number;
@@ -103,6 +118,8 @@ export interface ReviewResult {
     aiCodeLikelihood: 'high' | 'medium' | 'low';
     triage?: TriageResult;
     deepReviews?: DeepReviewResult[];
+    adversarialFindings?: AdversarialFinding[];
+    verdict?: VerdictResult;
 }
 export interface FileAnalysis {
     filename: string;

@@ -20,6 +20,7 @@ export interface ReviewPalConfig {
 
 export interface ArchitectureContext {
   architectureContext: string;
+  lessonsContext: string;
   config: ReviewPalConfig;
 }
 
@@ -103,6 +104,14 @@ export function loadArchitectureContext(repoRoot?: string): ArchitectureContext 
     }
   }
 
+  // Load lessons file (.reviewpal-lessons.md)
+  let lessonsContext = '';
+  const lessonsPath = join(root, '.reviewpal-lessons.md');
+  if (existsSync(lessonsPath)) {
+    const content = readFileSync(lessonsPath, 'utf-8');
+    lessonsContext = truncateAtSectionBoundary(content, 3000);
+  }
+
   // Load local CLAUDE.md
   const claudeMdPath = join(root, 'CLAUDE.md');
   if (existsSync(claudeMdPath)) {
@@ -159,6 +168,7 @@ export function loadArchitectureContext(repoRoot?: string): ArchitectureContext 
 
   return {
     architectureContext: contextParts.join('\n\n'),
+    lessonsContext,
     config,
   };
 }
