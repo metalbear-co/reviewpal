@@ -17,11 +17,19 @@ export function buildTriageSummary(files: DiffFile[]): string {
   for (const file of files) {
     parts.push(`### ${file.filename} (+${file.additions}/-${file.deletions})`);
     for (const hunk of file.hunks) {
-      // Show first 5 lines of each hunk to give the model a sense of the change
-      const lines = hunk.content.split('\n').slice(0, 5);
-      parts.push(lines.join('\n'));
-      if (hunk.content.split('\n').length > 5) {
-        parts.push('  ...');
+      const allLines = hunk.content.split('\n');
+      if (allLines.length <= 20) {
+        // Small hunk: show everything
+        parts.push(allLines.join('\n'));
+      } else if (allLines.length <= 40) {
+        // Medium hunk: show first 20 lines
+        parts.push(allLines.slice(0, 20).join('\n'));
+        parts.push(`  ... (${allLines.length - 20} more lines)`);
+      } else {
+        // Large hunk: show first 15 + last 5 to capture beginning and end
+        parts.push(allLines.slice(0, 15).join('\n'));
+        parts.push(`  ... (${allLines.length - 20} more lines)`);
+        parts.push(allLines.slice(-5).join('\n'));
       }
     }
     parts.push('');
@@ -60,7 +68,7 @@ ALL CHANGED FILES:
 ${fileList}
 
 CONDENSED CHANGES:
-${summary.slice(0, 12000)}
+${summary.slice(0, 20000)}
 
 Respond in JSON:
 {
