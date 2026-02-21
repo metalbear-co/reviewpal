@@ -9,12 +9,20 @@ exports.reviewPrioritizedFiles = reviewPrioritizedFiles;
 /**
  * Deep review a single file with its full unified diff
  */
-async function reviewFile(client, file, triageResult, architectureContext, config, model) {
+async function reviewFile(client, file, triageResult, architectureContext, lessonsContext, crossFileContext, config, model) {
     // Combine all hunks into one full diff for the file
     const fullDiff = file.hunks.map(h => h.content).join('\n...\n');
     let contextSection = '';
     if (architectureContext) {
         contextSection = `\nPROJECT CONTEXT:\n${architectureContext}\n`;
+    }
+    let lessonsSection = '';
+    if (lessonsContext) {
+        lessonsSection = `\nPAST LESSONS (from .reviewpal-lessons.md - do NOT repeat these false positives):\n${lessonsContext}\n`;
+    }
+    let crossFileSection = '';
+    if (crossFileContext) {
+        crossFileSection = `\nCROSS-FILE CONCERNS (from triage - check if changes here have matching updates in related files):\n${crossFileContext}\n`;
     }
     let reviewInstructions = '';
     if (config.review_instructions.length > 0) {
@@ -24,7 +32,7 @@ async function reviewFile(client, file, triageResult, architectureContext, confi
 
 PR SUMMARY: ${triageResult.prSummary}
 PR THEMES: ${triageResult.themes.join(', ')}
-${contextSection}${reviewInstructions}
+${contextSection}${lessonsSection}${crossFileSection}${reviewInstructions}
 The diff uses standard unified diff format:
 - Lines starting with "+" are additions (new code)
 - Lines starting with "-" are deletions (removed code)
@@ -35,16 +43,35 @@ FULL DIFF for ${file.filename} (+${file.additions}/-${file.deletions}):
 ${fullDiff.slice(0, 10000)}
 \`\`\`
 
-Report CRITICAL issues only:
-- Security vulnerabilities (exposed secrets, SQL injection, XSS)
-- Will crash in production (unhandled errors, null refs, race conditions)
-- Data loss risks (missing validation, destructive ops)
-- Major performance problems (N+1 queries, infinite loops, memory leaks)
+Report ONLY issues that would cause a PRODUCTION OUTAGE, DATA CORRUPTION, or SECURITY BREACH.
+The bar is: "Would a senior on-call engineer page the team about this?" If not, don't report it.
+
+STRICT type definitions (these are the ONLY valid types):
+- outage: The service goes down, process crashes, or requests fail for all users. An unhandled exception that terminates the process. An OOM or infinite loop under current traffic. NOT "a component might re-render incorrectly" or "a value might be wrong."
+- corruption: User data is silently wrong, lost, or permanently corrupted. Data written to the database is incorrect. NOT "a cache might be stale."
+- security: An attacker can exploit this TODAY. You can describe the exact HTTP request or input that triggers it.
 
 Pay attention to BOTH additions and deletions. A deletion that removes important validation or error handling is a critical issue.
 
-Ignore: style, naming, minor optimizations, comments, test files.
-Do NOT suggest adding try-catch or null checks where a failure would correctly surface a real bug.
+Do NOT report (these are NEVER findings):
+- Style, naming, minor optimizations, comments, test files
+- Architectural suggestions or "better ways" to do something (e.g., "move filtering to server", "use server-side pagination")
+- Hypothetical issues that require unusual inputs, malformed data, or unlikely conditions
+- Missing error handling where the failure would correctly surface as a visible bug (not silent corruption)
+- Performance issues that only matter at scale the project hasn't reached
+- React/frontend best practices: key props, memoization, re-render optimization, prop drilling
+- Missing null checks on values that come from the application's own code (not external input)
+- Missing optional chaining (?.) on fields that are required by the TypeScript type definition or API contract. If the type says the field exists, trust the type system.
+- Defensive coding suggestions like "add a guard to ensure X is an array" when the code already handles it, or the type guarantees it
+- Polling intervals, refetch frequencies, or caching strategies (these are product decisions, not bugs)
+- Client-side localStorage/sessionStorage parsing (users can't cause server outages with bad localStorage)
+- .sqlx cache files, lock files, or generated files (only review source code written by humans)
+
+SELF-CHECK: Before including ANY finding, ask yourself:
+1. Can I describe the EXACT sequence of normal user actions that triggers this?
+2. Would the result be an outage, data loss, or security breach (not just a console error or wrong UI state)?
+3. Would a senior engineer agree this is a production incident, not a code quality nit?
+If any answer is NO, do not include it.
 
 Respond in JSON:
 {
@@ -52,7 +79,7 @@ Respond in JSON:
   "summary": "1-2 sentence summary of what changed in this file",
   "critical": [
     {
-      "type": "security|crash|data-loss|performance",
+      "type": "outage|corruption|security",
       "line": line_number_in_new_file,
       "issue": "Brief what's wrong (1 sentence)",
       "friendlySuggestion": "Specific, actionable fix suggestion. 1-2 sentences."
@@ -60,7 +87,7 @@ Respond in JSON:
   ]
 }
 
-If no CRITICAL issues, return empty critical array.`;
+Return an empty critical array unless you are HIGHLY confident the issue would cause a production incident. Most code is fine. An empty array is the expected, normal result.`;
     const response = await client.models.generateContent({
         model,
         contents: prompt,
@@ -87,7 +114,7 @@ If no CRITICAL issues, return empty critical array.`;
  * Review prioritized files from triage within an API call budget.
  * Uses Promise.all for parallel execution.
  */
-async function reviewPrioritizedFiles(client, files, triageResult, architectureContext, config, model, maxCalls) {
+async function reviewPrioritizedFiles(client, files, triageResult, architectureContext, lessonsContext, config, model, maxCalls) {
     // Match files from triage to actual DiffFile objects
     const prioritizedFiles = [];
     for (const filename of triageResult.highPriorityFiles) {
@@ -106,7 +133,14 @@ async function reviewPrioritizedFiles(client, files, triageResult, architectureC
     const budget = Math.max(1, maxCalls - 1);
     const filesToReview = prioritizedFiles.slice(0, budget);
     // Run all deep reviews in parallel
-    const results = await Promise.all(filesToReview.map(file => reviewFile(client, file, triageResult, architectureContext, config, model)));
+    const results = await Promise.all(filesToReview.map(file => {
+        // Build cross-file context: find triage implications involving this file
+        const crossFileContext = triageResult.crossSystemImplications
+            .filter(impl => impl.filesInvolved.includes(file.filename))
+            .map(impl => `- ${impl.description} (risk: ${impl.risk}, files: ${impl.filesInvolved.join(', ')})`)
+            .join('\n');
+        return reviewFile(client, file, triageResult, architectureContext, lessonsContext, crossFileContext, config, model);
+    }));
     return results;
 }
 //# sourceMappingURL=deep-review.js.map

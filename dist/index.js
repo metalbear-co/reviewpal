@@ -21,9 +21,11 @@ const diff_js_1 = require("./parsers/diff.js");
 const gemini_js_1 = require("./api/gemini.js");
 const friendly_js_1 = require("./formatters/friendly.js");
 const context_js_1 = require("./pipeline/context.js");
-const triage_js_1 = require("./pipeline/triage.js");
-const deep_review_js_1 = require("./pipeline/deep-review.js");
-const VERSION = '3.0.0';
+const unified_review_js_1 = require("./pipeline/unified-review.js");
+const cross_repo_context_js_1 = require("./pipeline/cross-repo-context.js");
+const validate_js_1 = require("./pipeline/validate.js");
+const verdict_js_1 = require("./pipeline/verdict.js");
+const VERSION = '3.2.0';
 const DEFAULT_MODEL = 'gemini-2.5-pro';
 async function main() {
     const program = new commander_1.Command();
@@ -34,11 +36,9 @@ async function main() {
         .argument('[input]', 'Diff file, git range, or - for stdin')
         .option('-g, --git <range>', 'Use git diff for the specified range')
         .option('-f, --format <type>', 'Output format: friendly, json', 'friendly')
-        .option('-m, --max-hunks <n>', 'Maximum hunks to analyze (legacy mode)', '20')
-        .option('--max-api-calls <n>', 'Maximum API calls for triage pipeline', '10')
+        .option('--max-api-calls <n>', 'Maximum API calls (kept for backward compat, unified review uses 1 call)', '10')
         .option('--model <name>', 'Gemini model to use', DEFAULT_MODEL)
         .option('--repo-root <path>', 'Repository root for loading CLAUDE.md and .reviewpal.yml')
-        .option('--legacy', 'Use legacy per-hunk analysis instead of triage pipeline')
         .option('-q, --quiet', 'Minimal output')
         .action(runReview);
     await program.parseAsync(process.argv);
@@ -78,12 +78,18 @@ async function runReview(input, options) {
         }
         // Load architecture context
         spinner.start('Loading project context...');
-        const { architectureContext, config } = (0, context_js_1.loadArchitectureContext)(options.repoRoot || process.env.GITHUB_WORKSPACE || process.cwd());
+        const { architectureContext, lessonsContext, config, relatedReposLoaded } = (0, context_js_1.loadArchitectureContext)(options.repoRoot || process.env.GITHUB_WORKSPACE || process.cwd());
         if (architectureContext) {
             spinner.succeed('Loaded project context');
         }
         else {
             spinner.info('No CLAUDE.md or .reviewpal.yml found (continuing without project context)');
+        }
+        if (relatedReposLoaded.length > 0) {
+            spinner.info(`Loaded context from related repos: ${relatedReposLoaded.join(', ')}`);
+        }
+        if (lessonsContext) {
+            spinner.info('Loaded lessons from .reviewpal-lessons.md');
         }
         // Apply skip_patterns from config
         let filesToAnalyze = parsed.files;
@@ -97,55 +103,77 @@ async function runReview(input, options) {
             }
         }
         const startTime = Date.now();
-        let result;
-        if (options.legacy) {
-            // Legacy mode: per-hunk analysis (backward compatible)
-            result = await runLegacyPipeline(client, filesToAnalyze, options, architectureContext, spinner);
+        // Unified review: triage + deep review + adversarial in a single API call
+        spinner.start('Running unified review (triage + deep review + adversarial)...');
+        const { triage: triageResult, deepReviews, adversarialFindings } = await (0, unified_review_js_1.runUnifiedReview)(client, filesToAnalyze, architectureContext, lessonsContext, config, options.model);
+        spinner.succeed(`Unified review complete: ${triageResult.highPriorityFiles.length} files prioritized, ` +
+            `${deepReviews.length} deep-reviewed, ${adversarialFindings.length} adversarial findings`);
+        if (triageResult.crossSystemImplications.length > 0) {
+            spinner.info(`Found ${triageResult.crossSystemImplications.length} cross-system implication(s)`);
         }
-        else {
-            // New triage pipeline
-            const maxApiCalls = parseInt(options.maxApiCalls, 10) || config.max_api_calls;
-            spinner.start('Triaging PR changes...');
-            const triageResult = await (0, triage_js_1.triagePR)(client, filesToAnalyze, architectureContext, config, options.model);
-            spinner.succeed(`Triage complete: ${triageResult.highPriorityFiles.length} files prioritized`);
-            if (triageResult.crossSystemImplications.length > 0) {
-                spinner.info(`Found ${triageResult.crossSystemImplications.length} cross-system implication(s)`);
+        // Fetch cross-repo code context if related repos were detected
+        if (relatedReposLoaded.length > 0) {
+            spinner.start('Searching related repos for affected code...');
+            const crossRepoCode = await (0, cross_repo_context_js_1.fetchCrossRepoContext)(client, filesToAnalyze, triageResult, relatedReposLoaded, options.model);
+            if (crossRepoCode) {
+                spinner.succeed('Loaded cross-repo code context');
             }
-            spinner.start(`Deep reviewing ${Math.min(triageResult.highPriorityFiles.length, maxApiCalls - 1)} files...`);
-            const deepReviews = await (0, deep_review_js_1.reviewPrioritizedFiles)(client, filesToAnalyze, triageResult, architectureContext, config, options.model, maxApiCalls);
-            spinner.succeed(`Deep review complete (${deepReviews.length} files reviewed)`);
-            // Build ReviewResult for backward-compatible formatting
-            const fileAnalyses = deepReviews.map(dr => ({
-                filename: dr.filename,
-                hunks: [{
-                        hunk: {
-                            filename: dr.filename,
-                            fileDiffHash: parsed.files.find(f => f.filename === dr.filename)?.hunks[0]?.fileDiffHash,
-                            startLine: parsed.files.find(f => f.filename === dr.filename)?.hunks[0]?.startLine || 1,
-                            endLine: parsed.files.find(f => f.filename === dr.filename)?.hunks[0]?.endLine || 1,
-                            content: '',
-                            additions: [],
-                            deletions: [],
-                            context: '',
-                        },
-                        aiReview: {
-                            summary: dr.summary,
-                            critical: dr.critical,
-                            language: dr.language,
-                        },
-                        processingTime: 0,
-                    }],
-                overallComplexity: 0,
-            }));
-            result = {
-                files: fileAnalyses,
-                totalHunks: totalHunks,
-                totalProcessingTime: Date.now() - startTime,
-                aiCodeLikelihood: 'medium',
-                triage: triageResult,
-                deepReviews,
-            };
+            else {
+                spinner.info('No cross-repo code impact detected');
+            }
         }
+        // Validate findings (filter false positives)
+        const totalFindings = deepReviews.reduce((s, r) => s + r.critical.length, 0) + adversarialFindings.length;
+        let validatedDeep = deepReviews;
+        let validatedAdversarial = adversarialFindings;
+        if (totalFindings > 0) {
+            spinner.start(`Validating ${totalFindings} finding(s)...`);
+            const validation = await (0, validate_js_1.validateFindings)(client, filesToAnalyze, deepReviews, adversarialFindings, options.model);
+            validatedDeep = validation.deepReviews;
+            validatedAdversarial = validation.adversarialFindings;
+            if (validation.filteredCount > 0) {
+                spinner.succeed(`Filtered ${validation.filteredCount} false positive(s)`);
+            }
+            else {
+                spinner.succeed(`All ${totalFindings} finding(s) validated`);
+            }
+        }
+        // Compute verdict
+        const verdict = (0, verdict_js_1.computeVerdict)(validatedDeep, validatedAdversarial);
+        const verdictEmoji = verdict.verdict === 'BLOCK' ? '🔴' : verdict.verdict === 'WARN' ? '🟡' : '🟢';
+        spinner.info(`Verdict: ${verdictEmoji} ${verdict.verdict} - ${verdict.reason}`);
+        // Build ReviewResult (use validated findings)
+        const fileAnalyses = validatedDeep.map(dr => ({
+            filename: dr.filename,
+            hunks: [{
+                    hunk: {
+                        filename: dr.filename,
+                        fileDiffHash: parsed.files.find(f => f.filename === dr.filename)?.hunks[0]?.fileDiffHash,
+                        startLine: parsed.files.find(f => f.filename === dr.filename)?.hunks[0]?.startLine || 1,
+                        endLine: parsed.files.find(f => f.filename === dr.filename)?.hunks[0]?.endLine || 1,
+                        content: '',
+                        additions: [],
+                        deletions: [],
+                        context: '',
+                    },
+                    aiReview: {
+                        summary: dr.summary,
+                        critical: dr.critical,
+                        language: dr.language,
+                    },
+                    processingTime: 0,
+                }],
+            overallComplexity: 0,
+        }));
+        const result = {
+            files: fileAnalyses,
+            totalHunks: totalHunks,
+            totalProcessingTime: Date.now() - startTime,
+            triage: triageResult,
+            deepReviews: validatedDeep,
+            adversarialFindings: validatedAdversarial,
+            verdict,
+        };
         result.totalProcessingTime = Date.now() - startTime;
         spinner.succeed(`Analysis complete (${(result.totalProcessingTime / 1000).toFixed(1)}s)`);
         // Format and output
@@ -157,49 +185,6 @@ async function runReview(input, options) {
         console.error(chalk_1.default.red(error instanceof Error ? error.message : String(error)));
         process.exit(1);
     }
-}
-/**
- * Legacy per-hunk analysis pipeline (backward compatible)
- */
-async function runLegacyPipeline(client, files, options, architectureContext, spinner) {
-    const maxHunks = parseInt(options.maxHunks, 10);
-    const startTime = Date.now();
-    const fileAnalyses = [];
-    let processedHunks = 0;
-    for (const file of files) {
-        const hunkAnalyses = [];
-        for (const hunk of file.hunks.slice(0, maxHunks - processedHunks)) {
-            if (processedHunks >= maxHunks)
-                break;
-            spinner.start(`Analyzing ${file.filename}:${hunk.startLine}...`);
-            const analysis = await analyzeHunk(client, hunk, file.filename, options.model, architectureContext);
-            hunkAnalyses.push(analysis);
-            processedHunks++;
-        }
-        fileAnalyses.push({
-            filename: file.filename,
-            hunks: hunkAnalyses,
-            overallComplexity: 0
-        });
-    }
-    return {
-        files: fileAnalyses,
-        totalHunks: processedHunks,
-        totalProcessingTime: Date.now() - startTime,
-        aiCodeLikelihood: 'medium'
-    };
-}
-/**
- * Analyze a single hunk with AI (legacy mode, sends full unified diff)
- */
-async function analyzeHunk(client, hunk, filename, model, architectureContext) {
-    const startTime = Date.now();
-    const review = await (0, gemini_js_1.reviewCode)(client, hunk.content, filename, model, architectureContext);
-    return {
-        hunk,
-        aiReview: review,
-        processingTime: Date.now() - startTime
-    };
 }
 /**
  * Get diff content from various sources

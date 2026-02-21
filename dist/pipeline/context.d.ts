@@ -13,8 +13,16 @@ export interface ReviewPalConfig {
 }
 export interface ArchitectureContext {
     architectureContext: string;
+    lessonsContext: string;
     config: ReviewPalConfig;
+    relatedReposLoaded: string[];
 }
+/**
+ * Fetch a file from another GitHub repo using the gh CLI.
+ * Optionally specify a branch/ref to fetch from (defaults to default branch).
+ * Requires GITHUB_TOKEN or gh auth to have access to the target repo.
+ */
+export declare function fetchGitHubFile(owner: string, repo: string, filePath: string, ref?: string): string | null;
 /**
  * Load architecture context from CLAUDE.md and .reviewpal.yml
  *

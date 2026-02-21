@@ -16,20 +16,20 @@ import ora from 'ora';
 import chalk from 'chalk';
 
 import { parseDiff } from './parsers/diff.js';
-import { createGeminiClient, reviewCode } from './api/gemini.js';
+import { createGeminiClient } from './api/gemini.js';
 import { formatFriendlyReviewResult } from './formatters/friendly.js';
 import { loadArchitectureContext } from './pipeline/context.js';
-import { triagePR } from './pipeline/triage.js';
-import { reviewPrioritizedFiles } from './pipeline/deep-review.js';
+import { runUnifiedReview } from './pipeline/unified-review.js';
+import { fetchCrossRepoContext } from './pipeline/cross-repo-context.js';
+import { validateFindings } from './pipeline/validate.js';
+import { computeVerdict } from './pipeline/verdict.js';
 import {
-  DiffHunk,
-  HunkAnalysis,
   FileAnalysis,
   ReviewResult,
   OutputFormat,
 } from './types.js';
 
-const VERSION = '3.0.0';
+const VERSION = '3.2.0';
 const DEFAULT_MODEL = 'gemini-2.5-pro';
 
 async function main() {
@@ -42,11 +42,9 @@ async function main() {
     .argument('[input]', 'Diff file, git range, or - for stdin')
     .option('-g, --git <range>', 'Use git diff for the specified range')
     .option('-f, --format <type>', 'Output format: friendly, json', 'friendly')
-    .option('-m, --max-hunks <n>', 'Maximum hunks to analyze (legacy mode)', '20')
-    .option('--max-api-calls <n>', 'Maximum API calls for triage pipeline', '10')
+    .option('--max-api-calls <n>', 'Maximum API calls (kept for backward compat, unified review uses 1 call)', '10')
     .option('--model <name>', 'Gemini model to use', DEFAULT_MODEL)
     .option('--repo-root <path>', 'Repository root for loading CLAUDE.md and .reviewpal.yml')
-    .option('--legacy', 'Use legacy per-hunk analysis instead of triage pipeline')
     .option('-q, --quiet', 'Minimal output')
     .action(runReview);
 
@@ -58,11 +56,9 @@ async function runReview(
   options: {
     git?: string;
     format: string;
-    maxHunks: string;
     maxApiCalls: string;
     model: string;
     repoRoot?: string;
-    legacy?: boolean;
     quiet: boolean;
   }
 ) {
@@ -107,13 +103,19 @@ async function runReview(
 
     // Load architecture context
     spinner.start('Loading project context...');
-    const { architectureContext, config } = loadArchitectureContext(
+    const { architectureContext, lessonsContext, config, relatedReposLoaded } = loadArchitectureContext(
       options.repoRoot || process.env.GITHUB_WORKSPACE || process.cwd()
     );
     if (architectureContext) {
       spinner.succeed('Loaded project context');
     } else {
       spinner.info('No CLAUDE.md or .reviewpal.yml found (continuing without project context)');
+    }
+    if (relatedReposLoaded.length > 0) {
+      spinner.info(`Loaded context from related repos: ${relatedReposLoaded.join(', ')}`);
+    }
+    if (lessonsContext) {
+      spinner.info('Loaded lessons from .reviewpal-lessons.md');
     }
 
     // Apply skip_patterns from config
@@ -129,66 +131,91 @@ async function runReview(
     }
 
     const startTime = Date.now();
-    let result: ReviewResult;
 
-    if (options.legacy) {
-      // Legacy mode: per-hunk analysis (backward compatible)
-      result = await runLegacyPipeline(client, filesToAnalyze, options, architectureContext, spinner);
-    } else {
-      // New triage pipeline
-      const maxApiCalls = parseInt(options.maxApiCalls, 10) || config.max_api_calls;
+    // Unified review: triage + deep review + adversarial in a single API call
+    spinner.start('Running unified review (triage + deep review + adversarial)...');
+    const { triage: triageResult, deepReviews, adversarialFindings } =
+      await runUnifiedReview(client, filesToAnalyze, architectureContext, lessonsContext, config, options.model);
+    spinner.succeed(
+      `Unified review complete: ${triageResult.highPriorityFiles.length} files prioritized, ` +
+      `${deepReviews.length} deep-reviewed, ${adversarialFindings.length} adversarial findings`
+    );
 
-      spinner.start('Triaging PR changes...');
-      const triageResult = await triagePR(
-        client, filesToAnalyze, architectureContext, config, options.model
+    if (triageResult.crossSystemImplications.length > 0) {
+      spinner.info(
+        `Found ${triageResult.crossSystemImplications.length} cross-system implication(s)`
       );
-      spinner.succeed(`Triage complete: ${triageResult.highPriorityFiles.length} files prioritized`);
-
-      if (triageResult.crossSystemImplications.length > 0) {
-        spinner.info(
-          `Found ${triageResult.crossSystemImplications.length} cross-system implication(s)`
-        );
-      }
-
-      spinner.start(`Deep reviewing ${Math.min(triageResult.highPriorityFiles.length, maxApiCalls - 1)} files...`);
-      const deepReviews = await reviewPrioritizedFiles(
-        client, filesToAnalyze, triageResult, architectureContext, config, options.model, maxApiCalls
-      );
-      spinner.succeed(`Deep review complete (${deepReviews.length} files reviewed)`);
-
-      // Build ReviewResult for backward-compatible formatting
-      const fileAnalyses: FileAnalysis[] = deepReviews.map(dr => ({
-        filename: dr.filename,
-        hunks: [{
-          hunk: {
-            filename: dr.filename,
-            fileDiffHash: parsed.files.find(f => f.filename === dr.filename)?.hunks[0]?.fileDiffHash,
-            startLine: parsed.files.find(f => f.filename === dr.filename)?.hunks[0]?.startLine || 1,
-            endLine: parsed.files.find(f => f.filename === dr.filename)?.hunks[0]?.endLine || 1,
-            content: '',
-            additions: [],
-            deletions: [],
-            context: '',
-          },
-          aiReview: {
-            summary: dr.summary,
-            critical: dr.critical,
-            language: dr.language,
-          },
-          processingTime: 0,
-        }],
-        overallComplexity: 0,
-      }));
-
-      result = {
-        files: fileAnalyses,
-        totalHunks: totalHunks,
-        totalProcessingTime: Date.now() - startTime,
-        aiCodeLikelihood: 'medium',
-        triage: triageResult,
-        deepReviews,
-      };
     }
+
+    // Fetch cross-repo code context if related repos were detected
+    if (relatedReposLoaded.length > 0) {
+      spinner.start('Searching related repos for affected code...');
+      const crossRepoCode = await fetchCrossRepoContext(
+        client, filesToAnalyze, triageResult, relatedReposLoaded, options.model
+      );
+      if (crossRepoCode) {
+        spinner.succeed('Loaded cross-repo code context');
+      } else {
+        spinner.info('No cross-repo code impact detected');
+      }
+    }
+
+    // Validate findings (filter false positives)
+    const totalFindings = deepReviews.reduce((s, r) => s + r.critical.length, 0) + adversarialFindings.length;
+    let validatedDeep = deepReviews;
+    let validatedAdversarial = adversarialFindings;
+    if (totalFindings > 0) {
+      spinner.start(`Validating ${totalFindings} finding(s)...`);
+      const validation = await validateFindings(
+        client, filesToAnalyze, deepReviews, adversarialFindings, options.model
+      );
+      validatedDeep = validation.deepReviews;
+      validatedAdversarial = validation.adversarialFindings;
+      if (validation.filteredCount > 0) {
+        spinner.succeed(`Filtered ${validation.filteredCount} false positive(s)`);
+      } else {
+        spinner.succeed(`All ${totalFindings} finding(s) validated`);
+      }
+    }
+
+    // Compute verdict
+    const verdict = computeVerdict(validatedDeep, validatedAdversarial);
+    const verdictEmoji = verdict.verdict === 'BLOCK' ? '🔴' : verdict.verdict === 'WARN' ? '🟡' : '🟢';
+    spinner.info(`Verdict: ${verdictEmoji} ${verdict.verdict} - ${verdict.reason}`);
+
+    // Build ReviewResult (use validated findings)
+    const fileAnalyses: FileAnalysis[] = validatedDeep.map(dr => ({
+      filename: dr.filename,
+      hunks: [{
+        hunk: {
+          filename: dr.filename,
+          fileDiffHash: parsed.files.find(f => f.filename === dr.filename)?.hunks[0]?.fileDiffHash,
+          startLine: parsed.files.find(f => f.filename === dr.filename)?.hunks[0]?.startLine || 1,
+          endLine: parsed.files.find(f => f.filename === dr.filename)?.hunks[0]?.endLine || 1,
+          content: '',
+          additions: [],
+          deletions: [],
+          context: '',
+        },
+        aiReview: {
+          summary: dr.summary,
+          critical: dr.critical,
+          language: dr.language,
+        },
+        processingTime: 0,
+      }],
+      overallComplexity: 0,
+    }));
+
+    const result: ReviewResult = {
+      files: fileAnalyses,
+      totalHunks: totalHunks,
+      totalProcessingTime: Date.now() - startTime,
+      triage: triageResult,
+      deepReviews: validatedDeep,
+      adversarialFindings: validatedAdversarial,
+      verdict,
+    };
 
     result.totalProcessingTime = Date.now() - startTime;
     spinner.succeed(`Analysis complete (${(result.totalProcessingTime / 1000).toFixed(1)}s)`);
@@ -202,70 +229,6 @@ async function runReview(
     console.error(chalk.red(error instanceof Error ? error.message : String(error)));
     process.exit(1);
   }
-}
-
-/**
- * Legacy per-hunk analysis pipeline (backward compatible)
- */
-async function runLegacyPipeline(
-  client: import('@google/genai').GoogleGenAI,
-  files: import('./types.js').DiffFile[],
-  options: { maxHunks: string; model: string; quiet: boolean },
-  architectureContext: string,
-  spinner: ReturnType<typeof ora>
-): Promise<ReviewResult> {
-  const maxHunks = parseInt(options.maxHunks, 10);
-  const startTime = Date.now();
-  const fileAnalyses: FileAnalysis[] = [];
-  let processedHunks = 0;
-
-  for (const file of files) {
-    const hunkAnalyses: HunkAnalysis[] = [];
-
-    for (const hunk of file.hunks.slice(0, maxHunks - processedHunks)) {
-      if (processedHunks >= maxHunks) break;
-
-      spinner.start(`Analyzing ${file.filename}:${hunk.startLine}...`);
-      const analysis = await analyzeHunk(client, hunk, file.filename, options.model, architectureContext);
-      hunkAnalyses.push(analysis);
-
-      processedHunks++;
-    }
-
-    fileAnalyses.push({
-      filename: file.filename,
-      hunks: hunkAnalyses,
-      overallComplexity: 0
-    });
-  }
-
-  return {
-    files: fileAnalyses,
-    totalHunks: processedHunks,
-    totalProcessingTime: Date.now() - startTime,
-    aiCodeLikelihood: 'medium'
-  };
-}
-
-/**
- * Analyze a single hunk with AI (legacy mode, sends full unified diff)
- */
-async function analyzeHunk(
-  client: import('@google/genai').GoogleGenAI,
-  hunk: DiffHunk,
-  filename: string,
-  model: string,
-  architectureContext?: string
-): Promise<HunkAnalysis> {
-  const startTime = Date.now();
-
-  const review = await reviewCode(client, hunk.content, filename, model, architectureContext);
-
-  return {
-    hunk,
-    aiReview: review,
-    processingTime: Date.now() - startTime
-  };
 }
 
 /**

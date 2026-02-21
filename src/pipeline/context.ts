@@ -20,7 +20,9 @@ export interface ReviewPalConfig {
 
 export interface ArchitectureContext {
   architectureContext: string;
+  lessonsContext: string;
   config: ReviewPalConfig;
+  relatedReposLoaded: string[];
 }
 
 const DEFAULT_CONFIG: ReviewPalConfig = {
@@ -49,12 +51,14 @@ function parseCrossRepoRef(entry: string): { owner: string; repo: string; path: 
 
 /**
  * Fetch a file from another GitHub repo using the gh CLI.
+ * Optionally specify a branch/ref to fetch from (defaults to default branch).
  * Requires GITHUB_TOKEN or gh auth to have access to the target repo.
  */
-function fetchGitHubFile(owner: string, repo: string, filePath: string): string | null {
+export function fetchGitHubFile(owner: string, repo: string, filePath: string, ref?: string): string | null {
   try {
+    const refParam = ref ? `?ref=${encodeURIComponent(ref)}` : '';
     const result = execSync(
-      `gh api "/repos/${owner}/${repo}/contents/${filePath}" --jq '.content' 2>/dev/null`,
+      `gh api "/repos/${owner}/${repo}/contents/${filePath}${refParam}" --jq '.content' 2>/dev/null`,
       { encoding: 'utf-8', timeout: 10000 }
     ).trim();
 
@@ -65,6 +69,47 @@ function fetchGitHubFile(owner: string, repo: string, filePath: string): string 
   } catch {
     return null;
   }
+}
+
+/**
+ * Auto-detect related repos from CLAUDE.md content.
+ * Looks for patterns like:
+ *   - "See @../reponame/CLAUDE.md"
+ *   - "(source in `../reponame/`)"
+ *   - "See @../reponame/CLAUDE.md for ..."
+ * Resolves relative references against the current repo's org.
+ */
+function detectRelatedRepos(claudeMdContent: string, currentOrg: string): string[] {
+  const repos = new Set<string>();
+
+  // Match patterns like "../reponame/" or "../reponame/CLAUDE.md"
+  const patterns = [
+    /See\s+@\.\.\/([a-zA-Z0-9_-]+)\//gi,
+    /source\s+in\s+[`"']?\.\.\/([a-zA-Z0-9_-]+)\/?[`"']?/gi,
+    /\(in\s+`\.\.\/([a-zA-Z0-9_-]+)\/`\)/gi,
+    /separate\s+repo.*?[`"']?\.\.\/([a-zA-Z0-9_-]+)\/?[`"']?/gi,
+    /are\s+in\s+[`"']?\.\.\/([a-zA-Z0-9_-]+)\//gi,
+    /[`"']\.\.\/([a-zA-Z0-9_-]+)\/[^`"']*[`"']/g,
+  ];
+
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(claudeMdContent)) !== null) {
+      repos.add(`${currentOrg}/${match[1]}`);
+    }
+  }
+
+  return [...repos];
+}
+
+/**
+ * Get the current repo's org/owner from GITHUB_REPOSITORY env var.
+ */
+function getCurrentOrg(): string | null {
+  const repo = process.env.GITHUB_REPOSITORY;
+  if (!repo) return null;
+  const parts = repo.split('/');
+  return parts.length >= 2 ? parts[0] : null;
 }
 
 /**
@@ -103,16 +148,39 @@ export function loadArchitectureContext(repoRoot?: string): ArchitectureContext 
     }
   }
 
+  // Load lessons file (.reviewpal-lessons.md)
+  let lessonsContext = '';
+  const lessonsPath = join(root, '.reviewpal-lessons.md');
+  if (existsSync(lessonsPath)) {
+    const content = readFileSync(lessonsPath, 'utf-8');
+    lessonsContext = truncateAtSectionBoundary(content, 3000);
+  }
+
   // Load local CLAUDE.md
+  let claudeMdContent = '';
   const claudeMdPath = join(root, 'CLAUDE.md');
   if (existsSync(claudeMdPath)) {
-    const content = readFileSync(claudeMdPath, 'utf-8');
-    const truncated = truncateAtSectionBoundary(content, MAX_CONTEXT_CHARS);
+    claudeMdContent = readFileSync(claudeMdPath, 'utf-8');
+    const truncated = truncateAtSectionBoundary(claudeMdContent, MAX_CONTEXT_CHARS);
     contextParts.push(`## Project Architecture (from CLAUDE.md)\n\n${truncated}`);
   }
 
-  // Auto-fetch CLAUDE.md from related repos
-  for (const repoRef of config.related_repos) {
+  // Collect related repos: explicit config + auto-detected from CLAUDE.md
+  const relatedRepos = new Set(config.related_repos);
+  const currentOrg = getCurrentOrg();
+  if (claudeMdContent && currentOrg) {
+    const detected = detectRelatedRepos(claudeMdContent, currentOrg);
+    for (const repo of detected) {
+      relatedRepos.add(repo);
+    }
+    if (detected.length > 0) {
+      process.stderr.write(`[reviewpal] Auto-detected related repos from CLAUDE.md: ${detected.join(', ')}\n`);
+    }
+  }
+
+  // Fetch CLAUDE.md from each related repo
+  const relatedReposLoaded: string[] = [];
+  for (const repoRef of relatedRepos) {
     const parts = repoRef.split('/');
     if (parts.length !== 2) continue;
     const [owner, repo] = parts;
@@ -120,6 +188,8 @@ export function loadArchitectureContext(repoRoot?: string): ArchitectureContext 
     if (content) {
       const truncated = truncateAtSectionBoundary(content, 2000);
       contextParts.push(`## Related repo: ${owner}/${repo} (from CLAUDE.md)\n\n${truncated}`);
+      relatedReposLoaded.push(`${owner}/${repo}`);
+      process.stderr.write(`[reviewpal] Loaded CLAUDE.md from ${owner}/${repo} (${truncated.length} chars)\n`);
     }
   }
 
@@ -159,7 +229,9 @@ export function loadArchitectureContext(repoRoot?: string): ArchitectureContext 
 
   return {
     architectureContext: contextParts.join('\n\n'),
+    lessonsContext,
     config,
+    relatedReposLoaded,
   };
 }
 
