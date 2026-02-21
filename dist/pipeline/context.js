@@ -145,8 +145,12 @@ function loadArchitectureContext(repoRoot) {
     const relatedRepos = new Set(config.related_repos);
     const currentOrg = getCurrentOrg();
     if (claudeMdContent && currentOrg) {
-        for (const detected of detectRelatedRepos(claudeMdContent, currentOrg)) {
-            relatedRepos.add(detected);
+        const detected = detectRelatedRepos(claudeMdContent, currentOrg);
+        for (const repo of detected) {
+            relatedRepos.add(repo);
+        }
+        if (detected.length > 0) {
+            process.stderr.write(`[reviewpal] Auto-detected related repos from CLAUDE.md: ${detected.join(', ')}\n`);
         }
     }
     // Fetch CLAUDE.md from each related repo
@@ -161,6 +165,7 @@ function loadArchitectureContext(repoRoot) {
             const truncated = truncateAtSectionBoundary(content, 2000);
             contextParts.push(`## Related repo: ${owner}/${repo} (from CLAUDE.md)\n\n${truncated}`);
             relatedReposLoaded.push(`${owner}/${repo}`);
+            process.stderr.write(`[reviewpal] Loaded CLAUDE.md from ${owner}/${repo} (${truncated.length} chars)\n`);
         }
     }
     // Load additional context files (local or cross-repo)

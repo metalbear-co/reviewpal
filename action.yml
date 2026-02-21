@@ -89,13 +89,17 @@ runs:
       run: |
         cd ${{ github.action_path }}
 
-        # Single analysis run as JSON (saves ~50% API cost vs running twice)
+        # Single analysis run as JSON
+        # stderr goes to CI log (spinner messages, context loading info)
+        # stdout goes to analysis.json (the JSON result)
         node dist/index.js ${{ steps.diff.outputs.diff_file }} \
           --format json \
-          --quiet \
           --repo-root "$GITHUB_WORKSPACE" \
           --model ${{ inputs.model }} \
-          --max-api-calls ${{ inputs.max_api_calls }} > /tmp/analysis.json 2>&1 || echo '{"files":[],"totalHunks":0}' > /tmp/analysis.json
+          --max-api-calls ${{ inputs.max_api_calls }} > /tmp/analysis.json 2>/tmp/reviewpal-log.txt || echo '{"files":[],"totalHunks":0}' > /tmp/analysis.json
+
+        # Show the log in CI output
+        cat /tmp/reviewpal-log.txt || true
 
         # Extract key metrics
         echo "total_files=$(jq '.files | length // 0' /tmp/analysis.json)" >> $GITHUB_OUTPUT

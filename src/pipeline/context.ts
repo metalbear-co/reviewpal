@@ -169,8 +169,12 @@ export function loadArchitectureContext(repoRoot?: string): ArchitectureContext 
   const relatedRepos = new Set(config.related_repos);
   const currentOrg = getCurrentOrg();
   if (claudeMdContent && currentOrg) {
-    for (const detected of detectRelatedRepos(claudeMdContent, currentOrg)) {
-      relatedRepos.add(detected);
+    const detected = detectRelatedRepos(claudeMdContent, currentOrg);
+    for (const repo of detected) {
+      relatedRepos.add(repo);
+    }
+    if (detected.length > 0) {
+      process.stderr.write(`[reviewpal] Auto-detected related repos from CLAUDE.md: ${detected.join(', ')}\n`);
     }
   }
 
@@ -185,6 +189,7 @@ export function loadArchitectureContext(repoRoot?: string): ArchitectureContext 
       const truncated = truncateAtSectionBoundary(content, 2000);
       contextParts.push(`## Related repo: ${owner}/${repo} (from CLAUDE.md)\n\n${truncated}`);
       relatedReposLoaded.push(`${owner}/${repo}`);
+      process.stderr.write(`[reviewpal] Loaded CLAUDE.md from ${owner}/${repo} (${truncated.length} chars)\n`);
     }
   }
 
