@@ -22,6 +22,7 @@ import { loadArchitectureContext } from './pipeline/context.js';
 import { triagePR } from './pipeline/triage.js';
 import { reviewPrioritizedFiles } from './pipeline/deep-review.js';
 import { runAdversarialReview } from './pipeline/adversarial.js';
+import { fetchCrossRepoContext } from './pipeline/cross-repo-context.js';
 import { validateFindings } from './pipeline/validate.js';
 import { computeVerdict } from './pipeline/verdict.js';
 import {
@@ -147,6 +148,21 @@ async function runReview(
       );
     }
 
+    // Fetch cross-repo code context if related repos were detected
+    let fullContext = architectureContext;
+    if (relatedReposLoaded.length > 0) {
+      spinner.start('Searching related repos for affected code...');
+      const crossRepoCode = await fetchCrossRepoContext(
+        client, filesToAnalyze, triageResult, relatedReposLoaded, options.model
+      );
+      if (crossRepoCode) {
+        fullContext = architectureContext + '\n\n' + crossRepoCode;
+        spinner.succeed('Loaded cross-repo code context');
+      } else {
+        spinner.info('No cross-repo code impact detected');
+      }
+    }
+
     // Run deep review and adversarial passes in parallel
     const adversarialBudget = 3;
     const deepBudget = Math.max(1, maxApiCalls - adversarialBudget);
@@ -154,10 +170,10 @@ async function runReview(
 
     const [deepReviews, adversarialFindings] = await Promise.all([
       reviewPrioritizedFiles(
-        client, filesToAnalyze, triageResult, architectureContext, lessonsContext, config, options.model, deepBudget
+        client, filesToAnalyze, triageResult, fullContext, lessonsContext, config, options.model, deepBudget
       ),
       runAdversarialReview(
-        client, filesToAnalyze, triageResult, architectureContext, lessonsContext, config, options.model, adversarialBudget
+        client, filesToAnalyze, triageResult, fullContext, lessonsContext, config, options.model, adversarialBudget
       ),
     ]);
 

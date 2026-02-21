@@ -54,7 +54,7 @@ function parseCrossRepoRef(entry: string): { owner: string; repo: string; path: 
  * Optionally specify a branch/ref to fetch from (defaults to default branch).
  * Requires GITHUB_TOKEN or gh auth to have access to the target repo.
  */
-function fetchGitHubFile(owner: string, repo: string, filePath: string, ref?: string): string | null {
+export function fetchGitHubFile(owner: string, repo: string, filePath: string, ref?: string): string | null {
   try {
     const refParam = ref ? `?ref=${encodeURIComponent(ref)}` : '';
     const result = execSync(

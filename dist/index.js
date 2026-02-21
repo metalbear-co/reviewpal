@@ -24,6 +24,7 @@ const context_js_1 = require("./pipeline/context.js");
 const triage_js_1 = require("./pipeline/triage.js");
 const deep_review_js_1 = require("./pipeline/deep-review.js");
 const adversarial_js_1 = require("./pipeline/adversarial.js");
+const cross_repo_context_js_1 = require("./pipeline/cross-repo-context.js");
 const validate_js_1 = require("./pipeline/validate.js");
 const verdict_js_1 = require("./pipeline/verdict.js");
 const VERSION = '3.2.0';
@@ -112,13 +113,26 @@ async function runReview(input, options) {
         if (triageResult.crossSystemImplications.length > 0) {
             spinner.info(`Found ${triageResult.crossSystemImplications.length} cross-system implication(s)`);
         }
+        // Fetch cross-repo code context if related repos were detected
+        let fullContext = architectureContext;
+        if (relatedReposLoaded.length > 0) {
+            spinner.start('Searching related repos for affected code...');
+            const crossRepoCode = await (0, cross_repo_context_js_1.fetchCrossRepoContext)(client, filesToAnalyze, triageResult, relatedReposLoaded, options.model);
+            if (crossRepoCode) {
+                fullContext = architectureContext + '\n\n' + crossRepoCode;
+                spinner.succeed('Loaded cross-repo code context');
+            }
+            else {
+                spinner.info('No cross-repo code impact detected');
+            }
+        }
         // Run deep review and adversarial passes in parallel
         const adversarialBudget = 3;
         const deepBudget = Math.max(1, maxApiCalls - adversarialBudget);
         spinner.start(`Deep reviewing ${Math.min(triageResult.highPriorityFiles.length, deepBudget)} files + adversarial passes...`);
         const [deepReviews, adversarialFindings] = await Promise.all([
-            (0, deep_review_js_1.reviewPrioritizedFiles)(client, filesToAnalyze, triageResult, architectureContext, lessonsContext, config, options.model, deepBudget),
-            (0, adversarial_js_1.runAdversarialReview)(client, filesToAnalyze, triageResult, architectureContext, lessonsContext, config, options.model, adversarialBudget),
+            (0, deep_review_js_1.reviewPrioritizedFiles)(client, filesToAnalyze, triageResult, fullContext, lessonsContext, config, options.model, deepBudget),
+            (0, adversarial_js_1.runAdversarialReview)(client, filesToAnalyze, triageResult, fullContext, lessonsContext, config, options.model, adversarialBudget),
         ]);
         spinner.succeed(`Review complete (${deepReviews.length} files deep-reviewed, ${adversarialFindings.length} adversarial findings)`);
         // Validate findings (filter false positives)
