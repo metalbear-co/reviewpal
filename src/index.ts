@@ -19,9 +19,7 @@ import { parseDiff } from './parsers/diff.js';
 import { createGeminiClient } from './api/gemini.js';
 import { formatFriendlyReviewResult } from './formatters/friendly.js';
 import { loadArchitectureContext } from './pipeline/context.js';
-import { triagePR } from './pipeline/triage.js';
-import { reviewPrioritizedFiles } from './pipeline/deep-review.js';
-import { runAdversarialReview } from './pipeline/adversarial.js';
+import { runUnifiedReview } from './pipeline/unified-review.js';
 import { fetchCrossRepoContext } from './pipeline/cross-repo-context.js';
 import { validateFindings } from './pipeline/validate.js';
 import { computeVerdict } from './pipeline/verdict.js';
@@ -44,7 +42,7 @@ async function main() {
     .argument('[input]', 'Diff file, git range, or - for stdin')
     .option('-g, --git <range>', 'Use git diff for the specified range')
     .option('-f, --format <type>', 'Output format: friendly, json', 'friendly')
-    .option('--max-api-calls <n>', 'Maximum API calls (1 triage + N deep reviews + 3 adversarial)', '10')
+    .option('--max-api-calls <n>', 'Maximum API calls (kept for backward compat, unified review uses 1 call)', '10')
     .option('--model <name>', 'Gemini model to use', DEFAULT_MODEL)
     .option('--repo-root <path>', 'Repository root for loading CLAUDE.md and .reviewpal.yml')
     .option('-q, --quiet', 'Minimal output')
@@ -133,14 +131,15 @@ async function runReview(
     }
 
     const startTime = Date.now();
-    const maxApiCalls = parseInt(options.maxApiCalls, 10) || config.max_api_calls;
 
-    // Triage
-    spinner.start('Triaging PR changes...');
-    const triageResult = await triagePR(
-      client, filesToAnalyze, architectureContext, config, options.model
+    // Unified review: triage + deep review + adversarial in a single API call
+    spinner.start('Running unified review (triage + deep review + adversarial)...');
+    const { triage: triageResult, deepReviews, adversarialFindings } =
+      await runUnifiedReview(client, filesToAnalyze, architectureContext, lessonsContext, config, options.model);
+    spinner.succeed(
+      `Unified review complete: ${triageResult.highPriorityFiles.length} files prioritized, ` +
+      `${deepReviews.length} deep-reviewed, ${adversarialFindings.length} adversarial findings`
     );
-    spinner.succeed(`Triage complete: ${triageResult.highPriorityFiles.length} files prioritized`);
 
     if (triageResult.crossSystemImplications.length > 0) {
       spinner.info(
@@ -149,35 +148,17 @@ async function runReview(
     }
 
     // Fetch cross-repo code context if related repos were detected
-    let fullContext = architectureContext;
     if (relatedReposLoaded.length > 0) {
       spinner.start('Searching related repos for affected code...');
       const crossRepoCode = await fetchCrossRepoContext(
         client, filesToAnalyze, triageResult, relatedReposLoaded, options.model
       );
       if (crossRepoCode) {
-        fullContext = architectureContext + '\n\n' + crossRepoCode;
         spinner.succeed('Loaded cross-repo code context');
       } else {
         spinner.info('No cross-repo code impact detected');
       }
     }
-
-    // Run deep review and adversarial passes in parallel
-    const adversarialBudget = 3;
-    const deepBudget = Math.max(1, maxApiCalls - adversarialBudget);
-    spinner.start(`Deep reviewing ${Math.min(triageResult.highPriorityFiles.length, deepBudget)} files + adversarial passes...`);
-
-    const [deepReviews, adversarialFindings] = await Promise.all([
-      reviewPrioritizedFiles(
-        client, filesToAnalyze, triageResult, fullContext, lessonsContext, config, options.model, deepBudget
-      ),
-      runAdversarialReview(
-        client, filesToAnalyze, triageResult, fullContext, lessonsContext, config, options.model, adversarialBudget
-      ),
-    ]);
-
-    spinner.succeed(`Review complete (${deepReviews.length} files deep-reviewed, ${adversarialFindings.length} adversarial findings)`);
 
     // Validate findings (filter false positives)
     const totalFindings = deepReviews.reduce((s, r) => s + r.critical.length, 0) + adversarialFindings.length;

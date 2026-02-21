@@ -3,6 +3,9 @@
  * Runs multiple passes with different skeptical personas to catch
  * subtle issues that a single helpful review pass would miss.
  * Personas adapt based on the primary language(s) in the PR.
+ *
+ * NOTE: This module is no longer called from index.ts (unified-review.ts
+ * handles adversarial review inline). Kept for backward compatibility.
  */
 import { GoogleGenAI } from '@google/genai';
 import { DiffFile, TriageResult, AdversarialFinding } from '../types.js';

@@ -21,9 +21,7 @@ const diff_js_1 = require("./parsers/diff.js");
 const gemini_js_1 = require("./api/gemini.js");
 const friendly_js_1 = require("./formatters/friendly.js");
 const context_js_1 = require("./pipeline/context.js");
-const triage_js_1 = require("./pipeline/triage.js");
-const deep_review_js_1 = require("./pipeline/deep-review.js");
-const adversarial_js_1 = require("./pipeline/adversarial.js");
+const unified_review_js_1 = require("./pipeline/unified-review.js");
 const cross_repo_context_js_1 = require("./pipeline/cross-repo-context.js");
 const validate_js_1 = require("./pipeline/validate.js");
 const verdict_js_1 = require("./pipeline/verdict.js");
@@ -38,7 +36,7 @@ async function main() {
         .argument('[input]', 'Diff file, git range, or - for stdin')
         .option('-g, --git <range>', 'Use git diff for the specified range')
         .option('-f, --format <type>', 'Output format: friendly, json', 'friendly')
-        .option('--max-api-calls <n>', 'Maximum API calls (1 triage + N deep reviews + 3 adversarial)', '10')
+        .option('--max-api-calls <n>', 'Maximum API calls (kept for backward compat, unified review uses 1 call)', '10')
         .option('--model <name>', 'Gemini model to use', DEFAULT_MODEL)
         .option('--repo-root <path>', 'Repository root for loading CLAUDE.md and .reviewpal.yml')
         .option('-q, --quiet', 'Minimal output')
@@ -105,36 +103,25 @@ async function runReview(input, options) {
             }
         }
         const startTime = Date.now();
-        const maxApiCalls = parseInt(options.maxApiCalls, 10) || config.max_api_calls;
-        // Triage
-        spinner.start('Triaging PR changes...');
-        const triageResult = await (0, triage_js_1.triagePR)(client, filesToAnalyze, architectureContext, config, options.model);
-        spinner.succeed(`Triage complete: ${triageResult.highPriorityFiles.length} files prioritized`);
+        // Unified review: triage + deep review + adversarial in a single API call
+        spinner.start('Running unified review (triage + deep review + adversarial)...');
+        const { triage: triageResult, deepReviews, adversarialFindings } = await (0, unified_review_js_1.runUnifiedReview)(client, filesToAnalyze, architectureContext, lessonsContext, config, options.model);
+        spinner.succeed(`Unified review complete: ${triageResult.highPriorityFiles.length} files prioritized, ` +
+            `${deepReviews.length} deep-reviewed, ${adversarialFindings.length} adversarial findings`);
         if (triageResult.crossSystemImplications.length > 0) {
             spinner.info(`Found ${triageResult.crossSystemImplications.length} cross-system implication(s)`);
         }
         // Fetch cross-repo code context if related repos were detected
-        let fullContext = architectureContext;
         if (relatedReposLoaded.length > 0) {
             spinner.start('Searching related repos for affected code...');
             const crossRepoCode = await (0, cross_repo_context_js_1.fetchCrossRepoContext)(client, filesToAnalyze, triageResult, relatedReposLoaded, options.model);
             if (crossRepoCode) {
-                fullContext = architectureContext + '\n\n' + crossRepoCode;
                 spinner.succeed('Loaded cross-repo code context');
             }
             else {
                 spinner.info('No cross-repo code impact detected');
             }
         }
-        // Run deep review and adversarial passes in parallel
-        const adversarialBudget = 3;
-        const deepBudget = Math.max(1, maxApiCalls - adversarialBudget);
-        spinner.start(`Deep reviewing ${Math.min(triageResult.highPriorityFiles.length, deepBudget)} files + adversarial passes...`);
-        const [deepReviews, adversarialFindings] = await Promise.all([
-            (0, deep_review_js_1.reviewPrioritizedFiles)(client, filesToAnalyze, triageResult, fullContext, lessonsContext, config, options.model, deepBudget),
-            (0, adversarial_js_1.runAdversarialReview)(client, filesToAnalyze, triageResult, fullContext, lessonsContext, config, options.model, adversarialBudget),
-        ]);
-        spinner.succeed(`Review complete (${deepReviews.length} files deep-reviewed, ${adversarialFindings.length} adversarial findings)`);
         // Validate findings (filter false positives)
         const totalFindings = deepReviews.reduce((s, r) => s + r.critical.length, 0) + adversarialFindings.length;
         let validatedDeep = deepReviews;
