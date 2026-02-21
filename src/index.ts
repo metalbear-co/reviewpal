@@ -29,7 +29,7 @@ import {
   OutputFormat,
 } from './types.js';
 
-const VERSION = '3.1.0';
+const VERSION = '3.2.0';
 const DEFAULT_MODEL = 'gemini-2.5-pro';
 
 async function main() {
@@ -150,7 +150,7 @@ async function runReview(
 
     const [deepReviews, adversarialFindings] = await Promise.all([
       reviewPrioritizedFiles(
-        client, filesToAnalyze, triageResult, architectureContext, config, options.model, deepBudget
+        client, filesToAnalyze, triageResult, architectureContext, lessonsContext, config, options.model, deepBudget
       ),
       runAdversarialReview(
         client, filesToAnalyze, triageResult, architectureContext, lessonsContext, config, options.model, adversarialBudget

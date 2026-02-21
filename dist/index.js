@@ -25,7 +25,7 @@ const triage_js_1 = require("./pipeline/triage.js");
 const deep_review_js_1 = require("./pipeline/deep-review.js");
 const adversarial_js_1 = require("./pipeline/adversarial.js");
 const verdict_js_1 = require("./pipeline/verdict.js");
-const VERSION = '3.1.0';
+const VERSION = '3.2.0';
 const DEFAULT_MODEL = 'gemini-2.5-pro';
 async function main() {
     const program = new commander_1.Command();
@@ -113,7 +113,7 @@ async function runReview(input, options) {
         const deepBudget = Math.max(1, maxApiCalls - adversarialBudget);
         spinner.start(`Deep reviewing ${Math.min(triageResult.highPriorityFiles.length, deepBudget)} files + adversarial passes...`);
         const [deepReviews, adversarialFindings] = await Promise.all([
-            (0, deep_review_js_1.reviewPrioritizedFiles)(client, filesToAnalyze, triageResult, architectureContext, config, options.model, deepBudget),
+            (0, deep_review_js_1.reviewPrioritizedFiles)(client, filesToAnalyze, triageResult, architectureContext, lessonsContext, config, options.model, deepBudget),
             (0, adversarial_js_1.runAdversarialReview)(client, filesToAnalyze, triageResult, architectureContext, lessonsContext, config, options.model, adversarialBudget),
         ]);
         spinner.succeed(`Review complete (${deepReviews.length} files deep-reviewed, ${adversarialFindings.length} adversarial findings)`);

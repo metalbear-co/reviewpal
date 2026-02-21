@@ -9,12 +9,20 @@ exports.reviewPrioritizedFiles = reviewPrioritizedFiles;
 /**
  * Deep review a single file with its full unified diff
  */
-async function reviewFile(client, file, triageResult, architectureContext, config, model) {
+async function reviewFile(client, file, triageResult, architectureContext, lessonsContext, crossFileContext, config, model) {
     // Combine all hunks into one full diff for the file
     const fullDiff = file.hunks.map(h => h.content).join('\n...\n');
     let contextSection = '';
     if (architectureContext) {
         contextSection = `\nPROJECT CONTEXT:\n${architectureContext}\n`;
+    }
+    let lessonsSection = '';
+    if (lessonsContext) {
+        lessonsSection = `\nPAST LESSONS (from .reviewpal-lessons.md - do NOT repeat these false positives):\n${lessonsContext}\n`;
+    }
+    let crossFileSection = '';
+    if (crossFileContext) {
+        crossFileSection = `\nCROSS-FILE CONCERNS (from triage - check if changes here have matching updates in related files):\n${crossFileContext}\n`;
     }
     let reviewInstructions = '';
     if (config.review_instructions.length > 0) {
@@ -24,7 +32,7 @@ async function reviewFile(client, file, triageResult, architectureContext, confi
 
 PR SUMMARY: ${triageResult.prSummary}
 PR THEMES: ${triageResult.themes.join(', ')}
-${contextSection}${reviewInstructions}
+${contextSection}${lessonsSection}${crossFileSection}${reviewInstructions}
 The diff uses standard unified diff format:
 - Lines starting with "+" are additions (new code)
 - Lines starting with "-" are deletions (removed code)
@@ -35,23 +43,33 @@ FULL DIFF for ${file.filename} (+${file.additions}/-${file.deletions}):
 ${fullDiff.slice(0, 10000)}
 \`\`\`
 
-Report ONLY issues that would cause an INCIDENT if this code were deployed to production.
-Ask yourself: "Would this wake someone up at 3am?" If not, don't report it.
+Report ONLY issues that would cause a PRODUCTION OUTAGE, DATA CORRUPTION, or SECURITY BREACH.
+The bar is: "Would a senior on-call engineer page the team about this?" If not, don't report it.
 
-CRITICAL means:
-- Security: exploitable vulnerability with a concrete attack vector (not theoretical)
-- Crash: will throw/panic in production under normal usage (not edge cases that "could" happen)
-- Data loss: destructive operation on real data without safeguards
-- Performance: will degrade under current production load (not "could be slow someday")
+STRICT type definitions:
+- security: An attacker can exploit this TODAY. You can describe the exact HTTP request or input that triggers it.
+- crash: The application process will terminate or an unhandled exception will propagate to the user. NOT "a value might be wrong" or "a component might re-render incorrectly."
+- data-loss: User data will be permanently deleted or corrupted. NOT "a cache might be stale."
+- performance: The application will become unresponsive or OOM under CURRENT production traffic. NOT "this could be optimized."
 
 Pay attention to BOTH additions and deletions. A deletion that removes important validation or error handling is a critical issue.
 
-Do NOT report:
+Do NOT report (these are NEVER findings):
 - Style, naming, minor optimizations, comments, test files
-- Architectural suggestions or "better ways" to do something
-- Hypothetical issues that require unusual inputs or unlikely conditions
-- Missing error handling where the failure would correctly surface a real bug
+- Architectural suggestions or "better ways" to do something (e.g., "move filtering to server", "use server-side pagination")
+- Hypothetical issues that require unusual inputs, malformed data, or unlikely conditions
+- Missing error handling where the failure would correctly surface as a visible bug (not silent corruption)
 - Performance issues that only matter at scale the project hasn't reached
+- React/frontend best practices: key props, memoization, re-render optimization, prop drilling
+- Missing null checks on values that come from the application's own code (not external input)
+- Polling intervals, refetch frequencies, or caching strategies (these are product decisions, not bugs)
+- Client-side localStorage/sessionStorage parsing (users can't cause server outages with bad localStorage)
+
+SELF-CHECK: Before including ANY finding, ask yourself:
+1. Can I describe the EXACT sequence of normal user actions that triggers this?
+2. Would the result be an outage, data loss, or security breach (not just a console error or wrong UI state)?
+3. Would a senior engineer agree this is a production incident, not a code quality nit?
+If any answer is NO, do not include it.
 
 Respond in JSON:
 {
@@ -67,7 +85,7 @@ Respond in JSON:
   ]
 }
 
-If no CRITICAL issues, return empty critical array.`;
+Return an empty critical array unless you are HIGHLY confident the issue would cause a production incident. Most code is fine. An empty array is the expected, normal result.`;
     const response = await client.models.generateContent({
         model,
         contents: prompt,
@@ -94,7 +112,7 @@ If no CRITICAL issues, return empty critical array.`;
  * Review prioritized files from triage within an API call budget.
  * Uses Promise.all for parallel execution.
  */
-async function reviewPrioritizedFiles(client, files, triageResult, architectureContext, config, model, maxCalls) {
+async function reviewPrioritizedFiles(client, files, triageResult, architectureContext, lessonsContext, config, model, maxCalls) {
     // Match files from triage to actual DiffFile objects
     const prioritizedFiles = [];
     for (const filename of triageResult.highPriorityFiles) {
@@ -113,7 +131,14 @@ async function reviewPrioritizedFiles(client, files, triageResult, architectureC
     const budget = Math.max(1, maxCalls - 1);
     const filesToReview = prioritizedFiles.slice(0, budget);
     // Run all deep reviews in parallel
-    const results = await Promise.all(filesToReview.map(file => reviewFile(client, file, triageResult, architectureContext, config, model)));
+    const results = await Promise.all(filesToReview.map(file => {
+        // Build cross-file context: find triage implications involving this file
+        const crossFileContext = triageResult.crossSystemImplications
+            .filter(impl => impl.filesInvolved.includes(file.filename))
+            .map(impl => `- ${impl.description} (risk: ${impl.risk}, files: ${impl.filesInvolved.join(', ')})`)
+            .join('\n');
+        return reviewFile(client, file, triageResult, architectureContext, lessonsContext, crossFileContext, config, model);
+    }));
     return results;
 }
 //# sourceMappingURL=deep-review.js.map

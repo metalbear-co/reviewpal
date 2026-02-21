@@ -26,10 +26,6 @@ inputs:
     description: 'Post analysis as PR comment'
     required: false
     default: 'true'
-  format:
-    description: 'Output format: friendly, json'
-    required: false
-    default: 'friendly'
 
 outputs:
   total_files:
@@ -48,19 +44,19 @@ runs:
       uses: actions/setup-node@v4
       with:
         node-version: '20'
-    
+
     - name: Install dependencies
       shell: bash
       run: |
         cd ${{ github.action_path }}
         npm ci --production
-    
+
     - name: Build
       shell: bash
       run: |
         cd ${{ github.action_path }}
         npm run build
-    
+
     - name: Get PR diff
       shell: bash
       id: diff
@@ -69,7 +65,7 @@ runs:
         git diff origin/${{ github.base_ref }}...HEAD > /tmp/pr.diff
         echo "diff_file=/tmp/pr.diff" >> $GITHUB_OUTPUT
         echo "lines=$(wc -l < /tmp/pr.diff)" >> $GITHUB_OUTPUT
-    
+
     - name: Skip if no diff
       if: steps.diff.outputs.lines == '0'
       shell: bash
@@ -78,7 +74,7 @@ runs:
         echo "total_files=0" >> $GITHUB_OUTPUT
         echo "total_hunks=0" >> $GITHUB_OUTPUT
         exit 0
-    
+
     - name: Run analysis
       shell: bash
       id: analyze
@@ -93,20 +89,7 @@ runs:
       run: |
         cd ${{ github.action_path }}
 
-        # Run analysis (quiet mode to hide spinner)
-        node dist/index.js ${{ steps.diff.outputs.diff_file }} \
-          --format ${{ inputs.format }} \
-          --quiet \
-          --repo-root "$GITHUB_WORKSPACE" \
-          --model ${{ inputs.model }} \
-          --max-api-calls ${{ inputs.max_api_calls }} > /tmp/analysis.md 2>&1 || true
-
-        # Export for outputs
-        echo "analysis_markdown<<EOF" >> $GITHUB_OUTPUT
-        cat /tmp/analysis.md >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
-
-        # Also run JSON for structured data
+        # Single analysis run as JSON (saves ~50% API cost vs running twice)
         node dist/index.js ${{ steps.diff.outputs.diff_file }} \
           --format json \
           --quiet \
@@ -114,20 +97,21 @@ runs:
           --model ${{ inputs.model }} \
           --max-api-calls ${{ inputs.max_api_calls }} > /tmp/analysis.json 2>&1 || echo '{"files":[],"totalHunks":0}' > /tmp/analysis.json
 
-        # Extract key metrics safely
+        # Extract key metrics
         echo "total_files=$(jq '.files | length // 0' /tmp/analysis.json)" >> $GITHUB_OUTPUT
         echo "total_hunks=$(jq '.totalHunks // 0' /tmp/analysis.json)" >> $GITHUB_OUTPUT
         echo "verdict=$(jq -r '.verdict.verdict // "CLEAR"' /tmp/analysis.json)" >> $GITHUB_OUTPUT
-    
-    - name: Post inline comments and summary
+
+    - name: Post review and summary
       if: inputs.comment_on_pr == 'true' && github.event_name == 'pull_request' && steps.analyze.outputs.total_hunks != '0'
+      id: post
       uses: actions/github-script@v7
       with:
         github-token: ${{ inputs.github_token }}
         script: |
           const fs = require('fs');
           const analysisJson = JSON.parse(fs.readFileSync('/tmp/analysis.json', 'utf8'));
-          
+
           const EMOJI_MAP = {
             security: '🔒',
             crash: '💥',
@@ -143,11 +127,14 @@ runs:
             CLEAR: '🟢'
           };
 
-          // Parse the diff to find valid line numbers per file (lines visible in the diff)
-          // Also detect .not() on newly added lines
+          const FINDING_MARKER = '<!-- reviewpal-finding -->';
+          const SUMMARY_MARKER = '<!-- reviewpal -->';
+
+          // ── Step 1: Parse diff to find valid line numbers and .not() usage ──
+
           const diffContent = fs.readFileSync('/tmp/pr.diff', 'utf8');
-          const validLines = {};  // { "path/to/file": Set([line numbers]) }
-          const dotNotLines = [];  // { file, line } for added lines containing .not()
+          const validLines = {};
+          const dotNotLines = [];
           let currentFile = null;
           let newLineNum = 0;
           for (const line of diffContent.split('\n')) {
@@ -165,20 +152,18 @@ runs:
             if (currentFile && !line.startsWith('---') && !line.startsWith('diff ')) {
               if (line.startsWith('+') || line.startsWith(' ')) {
                 validLines[currentFile].add(newLineNum);
-                // Detect .not() on added lines only (not context lines)
                 if (line.startsWith('+') && line.match(/\.not\(\)/)) {
                   dotNotLines.push({ file: currentFile, line: newLineNum });
                 }
                 newLineNum++;
               } else if (line.startsWith('-')) {
-                // Deleted lines don't increment the new file line counter
+                // Deleted lines don't increment new file line counter
               } else {
                 newLineNum++;
               }
             }
           }
 
-          // Find the closest valid diff line for a file
           function closestValidLine(filePath, targetLine) {
             const lines = validLines[filePath];
             if (!lines || lines.size === 0) return null;
@@ -190,7 +175,45 @@ runs:
             return best;
           }
 
-          // Collect all critical issues from deep reviews
+          // ── Step 2: Delete old ReviewPal inline comments ──
+
+          let page = 1;
+          let oldComments = [];
+          while (true) {
+            const { data: batch } = await github.rest.pulls.listReviewComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              per_page: 100,
+              page
+            });
+            if (batch.length === 0) break;
+            oldComments.push(...batch);
+            if (batch.length < 100) break;
+            page++;
+          }
+
+          const staleComments = oldComments.filter(
+            c => c.body && (c.body.includes(FINDING_MARKER) || c.body.trim() === '🤌')
+          );
+
+          if (staleComments.length > 0) {
+            console.log(`Cleaning up ${staleComments.length} old ReviewPal comment(s)`);
+            for (const old of staleComments) {
+              try {
+                await github.rest.pulls.deleteReviewComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: old.id
+                });
+              } catch (e) {
+                console.log(`Failed to delete comment ${old.id}: ${e.message}`);
+              }
+            }
+          }
+
+          // ── Step 3: Collect all findings ──
+
           const allIssues = [];
           for (const file of analysisJson.files || []) {
             for (const hunk of file.hunks || []) {
@@ -200,8 +223,6 @@ runs:
                     file: file.filename,
                     line: issue.line,
                     type: issue.type,
-                    issue: issue.issue,
-                    diffHash: hunk.hunk.fileDiffHash,
                     friendlySuggestion: issue.friendlySuggestion || issue.issue,
                     source: 'deep-review'
                   });
@@ -210,100 +231,24 @@ runs:
             }
           }
 
-          // Collect adversarial findings
-          const adversarialFindings = analysisJson.adversarialFindings || [];
-          for (const finding of adversarialFindings) {
+          for (const finding of analysisJson.adversarialFindings || []) {
             allIssues.push({
               file: finding.filename,
               line: finding.line,
               type: finding.type,
-              issue: finding.issue,
               friendlySuggestion: finding.friendlySuggestion || finding.issue,
               source: 'adversarial',
               persona: finding.persona
             });
           }
 
-          // Get verdict
           const verdict = analysisJson.verdict || null;
-          
-          // Get PR summary from triage
           const prSummary = (analysisJson.triage && analysisJson.triage.prSummary) || '';
-          
-          if (allIssues.length === 0) {
-            // Post "no issues" message with verdict
-            const marker = '<!-- reviewpal -->';
-            let noIssuesMsg = `${marker}\n\n`;
-
-            // Show verdict at top
-            if (verdict) {
-              const vEmoji = VERDICT_EMOJI[verdict.verdict] || '⚪';
-              noIssuesMsg += `## ${vEmoji} Verdict: ${verdict.verdict}\n\n`;
-              noIssuesMsg += `> ${verdict.reason}\n\n---\n\n`;
-            }
-
-            if (prSummary) {
-              noIssuesMsg += `## 📋 What is this PR about\n\n${prSummary}\n\n---\n\n`;
-            }
-
-            if (!verdict) {
-              noIssuesMsg += `✅ **No critical issues found**`;
-            }
-            
-            // Check for existing comment
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number
-            });
-            
-            const botComment = comments.find(c => c.body && c.body.includes(marker));
-            
-            if (botComment) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botComment.id,
-                body: noIssuesMsg
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: noIssuesMsg
-              });
-            }
-            
-            console.log('No critical issues found - posted confirmation');
-          }
-
-          // Post chef's kiss on every .not() in added lines
           const headSha = context.payload.pull_request.head.sha;
-          if (dotNotLines.length > 0) {
-            console.log(`Found ${dotNotLines.length} .not() usage(s) - posting chef's kiss`);
-            for (const dot of dotNotLines) {
-              try {
-                await github.rest.pulls.createReviewComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: context.issue.number,
-                  body: '🤌',
-                  commit_id: headSha,
-                  path: dot.file,
-                  line: dot.line,
-                  side: 'RIGHT'
-                });
-              } catch (e) {
-                console.log(`Failed to chef-kiss ${dot.file}:${dot.line}:`, e.message);
-              }
-            }
-          }
 
-          if (allIssues.length === 0) return;
+          // ── Step 4: Build review comments (batched) ──
 
-          // Post inline comments on each line, snapping to nearest valid diff line
-          const commentLinks = [];
+          const reviewComments = [];
           const failedIssues = [];
 
           for (const item of allIssues) {
@@ -316,113 +261,114 @@ runs:
             if (Math.abs(diffLine - item.line) > 0) {
               console.log(`Snapped ${item.file}:${item.line} -> ${diffLine} (nearest diff line)`);
             }
-            try {
-              let commentBody = `${EMOJI_MAP[item.type] || '⚠️'} **${item.type.toUpperCase()}**: ${item.friendlySuggestion}`;
-              if (item.source === 'adversarial' && item.persona) {
-                commentBody += `\n\n_Found by ${item.persona}_`;
-              }
 
-              const comment = await github.rest.pulls.createReviewComment({
+            let body = `${FINDING_MARKER}\n${EMOJI_MAP[item.type] || '⚠️'} **${item.type.toUpperCase()}**: ${item.friendlySuggestion}`;
+            if (item.source === 'adversarial' && item.persona) {
+              body += `\n\n_Found by ${item.persona}_`;
+            }
+
+            reviewComments.push({
+              path: item.file,
+              line: diffLine,
+              side: 'RIGHT',
+              body
+            });
+          }
+
+          // Add chef's kiss comments for .not() usage
+          for (const dot of dotNotLines) {
+            const diffLine = closestValidLine(dot.file, dot.line);
+            if (diffLine) {
+              reviewComments.push({
+                path: dot.file,
+                line: diffLine,
+                side: 'RIGHT',
+                body: `${FINDING_MARKER}\n🤌`
+              });
+            }
+          }
+
+          // Submit as a single batched review (one notification instead of N)
+          if (reviewComments.length > 0) {
+            try {
+              await github.rest.pulls.createReview({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 pull_number: context.issue.number,
-                body: commentBody,
                 commit_id: headSha,
-                path: item.file,
-                line: diffLine,
-                side: 'RIGHT'
+                event: 'COMMENT',
+                comments: reviewComments
               });
-
-              const commentId = comment.data.id;
-              const commentAnchor = `#discussion_r${commentId}`;
-
-              commentLinks.push({
-                type: item.type,
-                url: commentAnchor,
-                file: item.file,
-                line: item.line
-              });
+              console.log(`Submitted review with ${reviewComments.length} inline comment(s)`);
             } catch (e) {
-              console.log(`Failed to comment on ${item.file}:${diffLine}:`, e.message);
-              failedIssues.push(item);
+              console.log(`Batched review failed: ${e.message}`);
+              // All issues fall back to summary
+              failedIssues.push(...allIssues);
             }
           }
-          
-          // Build summary
+
+          // ── Step 5: Build and post summary comment ──
+
           let summary = '';
 
-          // Show verdict at top
           if (verdict) {
             const vEmoji = VERDICT_EMOJI[verdict.verdict] || '⚪';
             summary += `## ${vEmoji} Verdict: ${verdict.verdict}\n\n`;
             summary += `> ${verdict.reason}\n\n---\n\n`;
           }
 
-          // Add PR summary with styling
           if (prSummary) {
-            summary += `## 📋 What is this PR about\n\n`;
-            summary += `${prSummary}\n\n`;
-            summary += `---\n\n`;
+            summary += `## 📋 What is this PR about\n\n${prSummary}\n\n---\n\n`;
           }
 
-          if (commentLinks.length > 0) {
-            // Build summary with numbered links to inline comments
+          if (allIssues.length === 0 && !verdict) {
+            summary += `✅ **No critical issues found**`;
+          } else if (allIssues.length > 0) {
+            // Group issues by type for the summary table
             const issuesByType = {};
-            let counter = 1;
-
-            for (const item of commentLinks) {
+            for (const item of allIssues) {
               if (!issuesByType[item.type]) issuesByType[item.type] = [];
-              issuesByType[item.type].push({
-                num: counter++,
-                url: item.url,
-                file: item.file,
-                line: item.line
-              });
+              issuesByType[item.type].push(item);
             }
-
-            summary += `## 💡 Suggestions\n\n`;
-            summary += `| Category | Count | Details |\n`;
-            summary += `|----------|-------|----------|\n`;
 
             const severityOrder = ['security', 'crash', 'data-loss', 'performance', 'regression', 'logic'];
             const sortedTypes = Object.keys(issuesByType).sort((a, b) => {
               return severityOrder.indexOf(a) - severityOrder.indexOf(b);
             });
 
+            summary += `## 💡 Suggestions\n\n`;
+            summary += `| Category | Count | Files |\n`;
+            summary += `|----------|-------|-------|\n`;
+
             for (const type of sortedTypes) {
               const items = issuesByType[type];
               const emoji = EMOJI_MAP[type] || '⚠️';
-              const links = items.map(i => `[${i.num}](${i.url})`).join(' ');
               const typeLabel = type.toUpperCase().replace('-', ' ');
-              summary += `| ${emoji} **${typeLabel}** | ${items.length} | ${links} |\n`;
+              const fileRefs = items.map(i => `\`${i.file.split('/').pop()}:${i.line}\``).join(', ');
+              summary += `| ${emoji} **${typeLabel}** | ${items.length} | ${fileRefs} |\n`;
             }
-          } else {
-            summary += `## 💡 Suggestions\n\n`;
           }
 
-          // Always include issues that couldn't be posted inline
+          // Include issues that couldn't be posted inline
           if (failedIssues.length > 0) {
-            if (commentLinks.length > 0) {
-              summary += `\n### Additional findings\n\n`;
-            }
+            summary += `\n### Additional findings\n\n`;
             for (const item of failedIssues) {
               const emoji = EMOJI_MAP[item.type] || '⚠️';
               summary += `${emoji} **${item.type.toUpperCase()}** in \`${item.file}:${item.line}\`\n`;
               summary += `> ${item.friendlySuggestion}\n\n`;
             }
           }
-          
+
           // Post or update summary comment
-          const marker = '<!-- reviewpal -->';
-          const { data: comments } = await github.rest.issues.listComments({
+          const { data: issueComments } = await github.rest.issues.listComments({
             owner: context.repo.owner,
             repo: context.repo.repo,
             issue_number: context.issue.number
           });
-          
-          const botComment = comments.find(c => c.body && c.body.includes(marker));
-          const body = `${marker}\n\n${summary}`;
-          
+
+          const botComment = issueComments.find(c => c.body && c.body.includes(SUMMARY_MARKER));
+          const body = `${SUMMARY_MARKER}\n\n${summary}`;
+
           if (botComment) {
             await github.rest.issues.updateComment({
               owner: context.repo.owner,
@@ -438,4 +384,7 @@ runs:
               body
             });
           }
-    
+
+          // Export analysis_markdown for downstream consumers
+          const output = summary.replace(/`/g, '\\`');
+          core.setOutput('analysis_markdown', summary);

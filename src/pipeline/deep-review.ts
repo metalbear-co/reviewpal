@@ -15,6 +15,8 @@ export async function reviewFile(
   file: DiffFile,
   triageResult: TriageResult,
   architectureContext: string,
+  lessonsContext: string,
+  crossFileContext: string,
   config: ReviewPalConfig,
   model: string
 ): Promise<DeepReviewResult> {
@@ -26,6 +28,16 @@ export async function reviewFile(
     contextSection = `\nPROJECT CONTEXT:\n${architectureContext}\n`;
   }
 
+  let lessonsSection = '';
+  if (lessonsContext) {
+    lessonsSection = `\nPAST LESSONS (from .reviewpal-lessons.md - do NOT repeat these false positives):\n${lessonsContext}\n`;
+  }
+
+  let crossFileSection = '';
+  if (crossFileContext) {
+    crossFileSection = `\nCROSS-FILE CONCERNS (from triage - check if changes here have matching updates in related files):\n${crossFileContext}\n`;
+  }
+
   let reviewInstructions = '';
   if (config.review_instructions.length > 0) {
     reviewInstructions = `\nADDITIONAL REVIEW INSTRUCTIONS:\n${config.review_instructions.map(r => `- ${r}`).join('\n')}\n`;
@@ -35,7 +47,7 @@ export async function reviewFile(
 
 PR SUMMARY: ${triageResult.prSummary}
 PR THEMES: ${triageResult.themes.join(', ')}
-${contextSection}${reviewInstructions}
+${contextSection}${lessonsSection}${crossFileSection}${reviewInstructions}
 The diff uses standard unified diff format:
 - Lines starting with "+" are additions (new code)
 - Lines starting with "-" are deletions (removed code)
@@ -123,6 +135,7 @@ export async function reviewPrioritizedFiles(
   files: DiffFile[],
   triageResult: TriageResult,
   architectureContext: string,
+  lessonsContext: string,
   config: ReviewPalConfig,
   model: string,
   maxCalls: number
@@ -151,9 +164,15 @@ export async function reviewPrioritizedFiles(
 
   // Run all deep reviews in parallel
   const results = await Promise.all(
-    filesToReview.map(file =>
-      reviewFile(client, file, triageResult, architectureContext, config, model)
-    )
+    filesToReview.map(file => {
+      // Build cross-file context: find triage implications involving this file
+      const crossFileContext = triageResult.crossSystemImplications
+        .filter(impl => impl.filesInvolved.includes(file.filename))
+        .map(impl => `- ${impl.description} (risk: ${impl.risk}, files: ${impl.filesInvolved.join(', ')})`)
+        .join('\n');
+
+      return reviewFile(client, file, triageResult, architectureContext, lessonsContext, crossFileContext, config, model);
+    })
   );
 
   return results;
