@@ -63,7 +63,23 @@ function buildFullDiffContent(files: DiffFile[]): string {
   let totalChars = 0;
 
   for (const file of sorted) {
-    const fullDiff = file.hunks.map(h => h.content).join('\n...\n');
+    // Add line numbers to each diff line so the LLM can report accurate positions
+    const fullDiff = file.hunks.map(h => {
+      let lineNum = h.startLine;
+      const numberedLines = h.content.split('\n').map(line => {
+        if (line.startsWith('-')) {
+          // Deleted lines don't have a new-file line number
+          return `     ${line}`;
+        }
+        const numbered = `${String(lineNum).padStart(4)} ${line}`;
+        // Context lines (" ") and additions ("+") advance the line counter
+        if (line.startsWith('+') || line.startsWith(' ') || line === '') {
+          lineNum++;
+        }
+        return numbered;
+      });
+      return `@@ starting at line ${h.startLine} @@\n${numberedLines.join('\n')}`;
+    }).join('\n...\n');
     const truncatedDiff = fullDiff.slice(0, PER_FILE_CHAR_LIMIT);
 
     if (totalChars + truncatedDiff.length > TOTAL_DIFF_BUDGET) {
@@ -140,9 +156,10 @@ The diff uses standard unified diff format:
 - Lines starting with "+" are additions (new code)
 - Lines starting with "-" are deletions (removed code)
 - Lines starting with " " (space) are context (unchanged code)
-- Hunk headers like "@@ -old_start,old_count +new_start,new_count @@" tell you the LINE NUMBERS in the NEW file
+- Each diff line is prefixed with its ACTUAL line number in the new file (4-digit prefix before the +/-/space)
+- Deleted lines ("-") have no line number since they don't exist in the new file
 
-CRITICAL: When reporting line numbers, use the ACTUAL line number in the NEW file (the number after "+" in the @@ header, counting forward for each "+" or " " line). Do NOT use relative positions within the diff. The line number must match the real file on disk after the PR is applied.
+CRITICAL: When reporting line numbers, use the 4-digit number prefixed on each diff line. These are the REAL line numbers in the file after the PR is applied.
 
 ALL CHANGED FILES:
 ${fileList}
