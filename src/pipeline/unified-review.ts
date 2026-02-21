@@ -33,6 +33,7 @@ interface UnifiedResponse {
       type?: string;
       line?: number;
       issue?: string;
+      existing_guards?: string;
       friendlySuggestion?: string;
     }>;
   }>;
@@ -42,6 +43,7 @@ interface UnifiedResponse {
     type?: string;
     line?: number;
     issue?: string;
+    existing_guards?: string;
     suggestion?: string;
   }>;
 }
@@ -225,7 +227,9 @@ ${'═'.repeat(60)}
 RESPONSE FORMAT
 ${'═'.repeat(60)}
 
-IMPORTANT: "line" must be the REAL line number in the new file (computed from @@ hunk headers), NOT the position within the diff output.
+IMPORTANT: "line" must be the REAL line number in the new file (from the 4-digit prefix on each diff line), NOT a relative position.
+
+Every finding (in both fileReviews.critical and adversarialFindings) MUST include an "existing_guards" field. Before writing the finding, search the surrounding code for anything that already prevents the issue: WHERE clauses, null checks, .is_some()/.is_ok(), try-catch, COALESCE, validation, type guards, default values, error boundaries. Write what you found. If the guards fully prevent the issue, DROP the finding (don't include it). Only include findings where the guards are absent or insufficient.
 
 Respond in JSON with this exact structure:
 {
@@ -251,6 +255,7 @@ Respond in JSON with this exact structure:
           "type": "outage|corruption|security",
           "line": 718,
           "issue": "Brief what's wrong (1 sentence)",
+          "existing_guards": "Describe what protective code you looked for and whether it handles this case. If it does, do not include this finding.",
           "friendlySuggestion": "Specific, actionable fix (1-2 sentences)"
         }
       ]
@@ -263,6 +268,7 @@ Respond in JSON with this exact structure:
       "type": "outage|corruption|security",
       "line": 718,
       "issue": "What's wrong and WHY it's dangerous (1-2 sentences)",
+      "existing_guards": "Describe what protective code you looked for and whether it handles this case.",
       "suggestion": "Specific fix (1 sentence)"
     }
   ]
