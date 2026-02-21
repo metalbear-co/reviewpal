@@ -78,6 +78,9 @@ The diff uses standard unified diff format:
 - Lines starting with "+" are additions (new code)
 - Lines starting with "-" are deletions (removed code)
 - Lines starting with " " (space) are context (unchanged code)
+- Hunk headers like "@@ -old_start,old_count +new_start,new_count @@" tell you the LINE NUMBERS in the NEW file
+
+CRITICAL: When reporting line numbers, use the ACTUAL line number in the NEW file (the number after "+" in the @@ header, counting forward for each "+" or " " line). Do NOT use relative positions within the diff. The line number must match the real file on disk after the PR is applied.
 
 ALL CHANGED FILES:
 ${fileList}
@@ -143,6 +146,8 @@ ${'═'.repeat(60)}
 RESPONSE FORMAT
 ${'═'.repeat(60)}
 
+IMPORTANT: "line" must be the REAL line number in the new file (computed from @@ hunk headers), NOT the position within the diff output.
+
 Respond in JSON with this exact structure:
 {
   "triage": {
@@ -165,7 +170,7 @@ Respond in JSON with this exact structure:
       "critical": [
         {
           "type": "outage|corruption|security",
-          "line": 42,
+          "line": 718,
           "issue": "Brief what's wrong (1 sentence)",
           "friendlySuggestion": "Specific, actionable fix (1-2 sentences)"
         }
@@ -177,7 +182,7 @@ Respond in JSON with this exact structure:
       "persona": "persona name",
       "filename": "path/to/file",
       "type": "outage|corruption|security",
-      "line": 42,
+      "line": 718,
       "issue": "What's wrong and WHY it's dangerous (1-2 sentences)",
       "suggestion": "Specific fix (1 sentence)"
     }
