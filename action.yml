@@ -193,8 +193,10 @@ runs:
             page++;
           }
 
+          // Match both new format (marker) and old format (emoji + bold type)
+          const REVIEWPAL_EMOJI_PATTERN = /^(<!-- reviewpal-finding -->|🔒 \*\*|💥 \*\*|🗑️ \*\*|🐌 \*\*|🔄 \*\*|🧩 \*\*|⚠️ \*\*)/;
           const staleComments = oldComments.filter(
-            c => c.body && (c.body.includes(FINDING_MARKER) || c.body.trim() === '🤌')
+            c => c.body && (c.body.includes(FINDING_MARKER) || c.body.trim() === '🤌' || REVIEWPAL_EMOJI_PATTERN.test(c.body.trim()))
           );
 
           if (staleComments.length > 0) {
