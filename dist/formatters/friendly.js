@@ -5,12 +5,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.formatFriendlyReviewResult = formatFriendlyReviewResult;
 const EMOJI_MAP = {
+    outage: '💥',
+    corruption: '🗑️',
     security: '🔒',
-    crash: '💥',
-    'data-loss': '🗑️',
-    performance: '🐌',
-    regression: '🔄',
-    logic: '🧩'
 };
 const VERDICT_EMOJI = {
     BLOCK: '🔴',

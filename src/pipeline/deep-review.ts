@@ -61,11 +61,10 @@ ${fullDiff.slice(0, 10000)}
 Report ONLY issues that would cause a PRODUCTION OUTAGE, DATA CORRUPTION, or SECURITY BREACH.
 The bar is: "Would a senior on-call engineer page the team about this?" If not, don't report it.
 
-STRICT type definitions:
+STRICT type definitions (these are the ONLY valid types):
+- outage: The service goes down, process crashes, or requests fail for all users. An unhandled exception that terminates the process. An OOM or infinite loop under current traffic. NOT "a component might re-render incorrectly" or "a value might be wrong."
+- corruption: User data is silently wrong, lost, or permanently corrupted. Data written to the database is incorrect. NOT "a cache might be stale."
 - security: An attacker can exploit this TODAY. You can describe the exact HTTP request or input that triggers it.
-- crash: The application process will terminate or an unhandled exception will propagate to the user. NOT "a value might be wrong" or "a component might re-render incorrectly."
-- data-loss: User data will be permanently deleted or corrupted. NOT "a cache might be stale."
-- performance: The application will become unresponsive or OOM under CURRENT production traffic. NOT "this could be optimized."
 
 Pay attention to BOTH additions and deletions. A deletion that removes important validation or error handling is a critical issue.
 
@@ -95,7 +94,7 @@ Respond in JSON:
   "summary": "1-2 sentence summary of what changed in this file",
   "critical": [
     {
-      "type": "security|crash|data-loss|performance",
+      "type": "outage|corruption|security",
       "line": line_number_in_new_file,
       "issue": "Brief what's wrong (1 sentence)",
       "friendlySuggestion": "Specific, actionable fix suggestion. 1-2 sentences."

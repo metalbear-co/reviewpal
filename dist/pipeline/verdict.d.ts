@@ -7,8 +7,7 @@ import { DeepReviewResult, AdversarialFinding, VerdictResult } from '../types.js
 /**
  * Compute a verdict based on all findings.
  *
- * BLOCK: Any security, crash, or data-loss issue found
- * WARN: Only performance/regression/logic issues found
+ * BLOCK: Any outage, corruption, or security issue found
  * CLEAR: No issues found
  */
 export declare function computeVerdict(deepReviews: DeepReviewResult[], adversarialFindings: AdversarialFinding[]): VerdictResult;

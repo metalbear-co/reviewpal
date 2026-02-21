@@ -100,11 +100,10 @@ For each high-priority file you identified in Task 1, provide a detailed review.
 Report ONLY issues that would cause a PRODUCTION OUTAGE, DATA CORRUPTION, or SECURITY BREACH.
 The bar is: "Would a senior on-call engineer page the team about this?" If not, don't report it.
 
-STRICT type definitions:
+STRICT type definitions (these are the ONLY valid types):
+- outage: The service goes down, process crashes, or requests fail for all users. An unhandled exception that terminates the process. An OOM or infinite loop under current traffic. NOT "a component might re-render" or "a value might be wrong."
+- corruption: User data is silently wrong, lost, or permanently corrupted. Data written to the database is incorrect. NOT "a cache might be stale" or "a UI shows the wrong value temporarily."
 - security: An attacker can exploit this TODAY. You can describe the exact HTTP request or input that triggers it.
-- crash: The application process will terminate or an unhandled exception will propagate to the user. NOT "a value might be wrong."
-- data-loss: User data will be permanently deleted or corrupted. NOT "a cache might be stale."
-- performance: The application will become unresponsive or OOM under CURRENT production traffic. NOT "this could be optimized."
 
 Pay attention to BOTH additions and deletions. A deletion that removes important validation or error handling is a critical issue.
 
@@ -165,7 +164,7 @@ Respond in JSON with this exact structure:
       "summary": "1-2 sentence summary of changes in this file",
       "critical": [
         {
-          "type": "security|crash|data-loss|performance",
+          "type": "outage|corruption|security",
           "line": 42,
           "issue": "Brief what's wrong (1 sentence)",
           "friendlySuggestion": "Specific, actionable fix (1-2 sentences)"
@@ -177,7 +176,7 @@ Respond in JSON with this exact structure:
     {
       "persona": "persona name",
       "filename": "path/to/file",
-      "type": "security|crash|data-loss|performance|regression",
+      "type": "outage|corruption|security",
       "line": 42,
       "issue": "What's wrong and WHY it's dangerous (1-2 sentences)",
       "suggestion": "Specific fix (1 sentence)"
@@ -248,7 +247,7 @@ function mapDeepReviews(raw) {
         filename: r.filename,
         summary: r.summary || 'Code changes',
         critical: Array.isArray(r.critical) ? r.critical.map(c => ({
-            type: (c.type || 'security'),
+            type: (c.type || 'outage'),
             line: c.line || 1,
             issue: c.issue || '',
             friendlySuggestion: c.friendlySuggestion || c.issue || '',
@@ -264,7 +263,7 @@ function mapAdversarialFindings(raw) {
         .map(f => ({
         persona: f.persona || 'Unknown',
         filename: f.filename,
-        type: (f.type || 'security'),
+        type: (f.type || 'outage'),
         line: f.line || 1,
         issue: f.issue,
         friendlySuggestion: f.suggestion || f.issue,

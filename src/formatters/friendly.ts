@@ -5,12 +5,9 @@
 import { ReviewResult } from '../types.js';
 
 const EMOJI_MAP: Record<string, string> = {
+  outage: '💥',
+  corruption: '🗑️',
   security: '🔒',
-  crash: '💥',
-  'data-loss': '🗑️',
-  performance: '🐌',
-  regression: '🔄',
-  logic: '🧩'
 };
 
 const VERDICT_EMOJI: Record<string, string> = {

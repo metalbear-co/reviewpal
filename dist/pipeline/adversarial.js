@@ -105,7 +105,7 @@ Return at most 1 finding. Only report something you are highly confident would c
                     findings.push({
                         persona: persona.name,
                         filename: f.filename,
-                        type: f.type || persona.focusTypes[0] || 'security',
+                        type: f.type || persona.focusTypes[0] || 'outage',
                         line: f.line || 1,
                         issue: f.issue,
                         friendlySuggestion: f.suggestion || f.issue,

@@ -46,7 +46,7 @@ Compare the removed lines (-) with the added lines (+) carefully.
 The most dangerous regressions are where the code LOOKS correct but behaves differently in edge cases.
 
 Only flag regressions that would break EXISTING behavior. Do NOT flag missing features or "nice to have" improvements.`,
-    focusTypes: ['regression', 'crash', 'data-loss'],
+    focusTypes: ['outage', 'corruption'],
 };
 // ── Language-specific specialists ──
 exports.RUST_SPECIALIST = {
@@ -65,7 +65,7 @@ Focus on:
 
 Only flag issues where you can describe the EXACT input or state that triggers the bug.
 "Could panic" is not enough. "Will panic when X is empty because line Y calls unwrap" IS a finding.`,
-    focusTypes: ['crash', 'security'],
+    focusTypes: ['outage', 'security'],
 };
 exports.TYPESCRIPT_SPECIALIST = {
     name: 'Runtime Correctness Analyst',
@@ -82,7 +82,7 @@ Focus on:
 
 Only flag issues where the TypeScript compiler would NOT catch the bug but it would fail at runtime.
 Type-level suggestions or "use stricter types" are NOT findings.`,
-    focusTypes: ['crash', 'security'],
+    focusTypes: ['outage', 'security'],
 };
 exports.PYTHON_SPECIALIST = {
     name: 'Python Runtime Analyst',
@@ -99,7 +99,7 @@ Focus on:
 - File handle or connection leaks (missing context managers)
 
 Only flag issues that would cause a crash or security breach at runtime. Style suggestions are NOT findings.`,
-    focusTypes: ['crash', 'security'],
+    focusTypes: ['outage', 'security'],
 };
 exports.GO_SPECIALIST = {
     name: 'Go Concurrency Analyst',
@@ -115,7 +115,7 @@ Focus on:
 - Error wrapping that loses the original error chain
 
 Only flag issues that would cause a crash, deadlock, or data race in production.`,
-    focusTypes: ['crash', 'performance'],
+    focusTypes: ['outage'],
 };
 exports.DEFAULT_SPECIALIST = {
     name: 'Concurrency & Resource Analyst',
@@ -134,7 +134,7 @@ Focus on:
 Only flag issues that would cause an outage or degradation under CURRENT production load.
 "Could be slow with 10x data" is NOT a finding. "Will OOM with current traffic" IS a finding.
 Architectural suggestions like "move filtering to the server" are NOT findings.`,
-    focusTypes: ['performance', 'crash'],
+    focusTypes: ['outage'],
 };
 exports.EXTENSION_MAP = {
     '.rs': 'rust',

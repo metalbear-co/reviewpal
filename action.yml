@@ -117,12 +117,9 @@ runs:
           const analysisJson = JSON.parse(fs.readFileSync('/tmp/analysis.json', 'utf8'));
 
           const EMOJI_MAP = {
+            outage: '💥',
+            corruption: '🗑️',
             security: '🔒',
-            crash: '💥',
-            'data-loss': '🗑️',
-            performance: '🐌',
-            regression: '🔄',
-            logic: '🧩'
           };
 
           const VERDICT_EMOJI = {
@@ -337,7 +334,7 @@ runs:
               issuesByType[item.type].push(item);
             }
 
-            const severityOrder = ['security', 'crash', 'data-loss', 'performance', 'regression', 'logic'];
+            const severityOrder = ['outage', 'corruption', 'security'];
             const sortedTypes = Object.keys(issuesByType).sort((a, b) => {
               return severityOrder.indexOf(a) - severityOrder.indexOf(b);
             });

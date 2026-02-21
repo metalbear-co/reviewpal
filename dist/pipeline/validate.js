@@ -81,7 +81,7 @@ A finding is a FALSE POSITIVE if ANY of these apply:
 - The field/variable is guaranteed to exist by the type system or API contract
 - It's an architectural suggestion, not a bug (e.g., "move X to server", "add pagination")
 - It's about code style or best practices, not a production incident
-- The "crash" would actually be caught by an error boundary or try-catch and not crash the process
+- The "outage" would actually be caught by an error boundary or try-catch and not crash the process
 - The finding is about a generated file, config file, or lock file, not source code
 
 A finding is a TRUE POSITIVE only if:

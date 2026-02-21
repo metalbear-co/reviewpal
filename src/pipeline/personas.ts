@@ -34,6 +34,7 @@ If you can't describe the exact steps to exploit it, don't flag it.`,
 };
 
 export const REGRESSION_HUNTER: PersonaConfig = {
+
   name: 'Silent Regression Hunter',
   systemPrompt: `You are hunting for silent regressions: behavioral changes that existing tests might NOT catch.
 
@@ -51,7 +52,7 @@ Compare the removed lines (-) with the added lines (+) carefully.
 The most dangerous regressions are where the code LOOKS correct but behaves differently in edge cases.
 
 Only flag regressions that would break EXISTING behavior. Do NOT flag missing features or "nice to have" improvements.`,
-  focusTypes: ['regression', 'crash', 'data-loss'],
+  focusTypes: ['outage', 'corruption'],
 };
 
 // ── Language-specific specialists ──
@@ -72,7 +73,7 @@ Focus on:
 
 Only flag issues where you can describe the EXACT input or state that triggers the bug.
 "Could panic" is not enough. "Will panic when X is empty because line Y calls unwrap" IS a finding.`,
-  focusTypes: ['crash', 'security'],
+  focusTypes: ['outage', 'security'],
 };
 
 export const TYPESCRIPT_SPECIALIST: PersonaConfig = {
@@ -90,7 +91,7 @@ Focus on:
 
 Only flag issues where the TypeScript compiler would NOT catch the bug but it would fail at runtime.
 Type-level suggestions or "use stricter types" are NOT findings.`,
-  focusTypes: ['crash', 'security'],
+  focusTypes: ['outage', 'security'],
 };
 
 export const PYTHON_SPECIALIST: PersonaConfig = {
@@ -108,7 +109,7 @@ Focus on:
 - File handle or connection leaks (missing context managers)
 
 Only flag issues that would cause a crash or security breach at runtime. Style suggestions are NOT findings.`,
-  focusTypes: ['crash', 'security'],
+  focusTypes: ['outage', 'security'],
 };
 
 export const GO_SPECIALIST: PersonaConfig = {
@@ -125,7 +126,7 @@ Focus on:
 - Error wrapping that loses the original error chain
 
 Only flag issues that would cause a crash, deadlock, or data race in production.`,
-  focusTypes: ['crash', 'performance'],
+  focusTypes: ['outage'],
 };
 
 export const DEFAULT_SPECIALIST: PersonaConfig = {
@@ -145,7 +146,7 @@ Focus on:
 Only flag issues that would cause an outage or degradation under CURRENT production load.
 "Could be slow with 10x data" is NOT a finding. "Will OOM with current traffic" IS a finding.
 Architectural suggestions like "move filtering to the server" are NOT findings.`,
-  focusTypes: ['performance', 'crash'],
+  focusTypes: ['outage'],
 };
 
 // ── Language detection ──

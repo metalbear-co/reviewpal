@@ -23,7 +23,7 @@ export interface DiffFile {
 export interface AIReview {
     summary: string;
     critical: Array<{
-        type: 'security' | 'crash' | 'data-loss' | 'performance';
+        type: 'outage' | 'corruption' | 'security';
         line: number;
         issue: string;
         friendlySuggestion: string;
@@ -50,7 +50,7 @@ export interface DeepReviewResult {
     filename: string;
     summary: string;
     critical: Array<{
-        type: 'security' | 'crash' | 'data-loss' | 'performance';
+        type: 'outage' | 'corruption' | 'security';
         line: number;
         issue: string;
         friendlySuggestion: string;
@@ -60,7 +60,7 @@ export interface DeepReviewResult {
 export interface AdversarialFinding {
     persona: string;
     filename: string;
-    type: 'security' | 'crash' | 'data-loss' | 'performance' | 'regression' | 'logic';
+    type: 'outage' | 'corruption' | 'security';
     line: number;
     issue: string;
     friendlySuggestion: string;

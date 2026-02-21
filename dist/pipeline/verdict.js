@@ -6,13 +6,11 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.computeVerdict = computeVerdict;
-const BLOCKING_TYPES = new Set(['security', 'crash', 'data-loss']);
-const WARNING_TYPES = new Set(['performance', 'regression', 'logic']);
+const BLOCKING_TYPES = new Set(['outage', 'corruption', 'security']);
 /**
  * Compute a verdict based on all findings.
  *
- * BLOCK: Any security, crash, or data-loss issue found
- * WARN: Only performance/regression/logic issues found
+ * BLOCK: Any outage, corruption, or security issue found
  * CLEAR: No issues found
  */
 function computeVerdict(deepReviews, adversarialFindings) {
