@@ -15,6 +15,7 @@ export interface ArchitectureContext {
     architectureContext: string;
     lessonsContext: string;
     config: ReviewPalConfig;
+    relatedReposLoaded: string[];
 }
 /**
  * Load architecture context from CLAUDE.md and .reviewpal.yml

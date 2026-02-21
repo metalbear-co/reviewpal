@@ -79,12 +79,15 @@ async function runReview(input, options) {
         }
         // Load architecture context
         spinner.start('Loading project context...');
-        const { architectureContext, lessonsContext, config } = (0, context_js_1.loadArchitectureContext)(options.repoRoot || process.env.GITHUB_WORKSPACE || process.cwd());
+        const { architectureContext, lessonsContext, config, relatedReposLoaded } = (0, context_js_1.loadArchitectureContext)(options.repoRoot || process.env.GITHUB_WORKSPACE || process.cwd());
         if (architectureContext) {
             spinner.succeed('Loaded project context');
         }
         else {
             spinner.info('No CLAUDE.md or .reviewpal.yml found (continuing without project context)');
+        }
+        if (relatedReposLoaded.length > 0) {
+            spinner.info(`Loaded context from related repos: ${relatedReposLoaded.join(', ')}`);
         }
         if (lessonsContext) {
             spinner.info('Loaded lessons from .reviewpal-lessons.md');

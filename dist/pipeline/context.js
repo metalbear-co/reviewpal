@@ -38,11 +38,13 @@ function parseCrossRepoRef(entry) {
 }
 /**
  * Fetch a file from another GitHub repo using the gh CLI.
+ * Optionally specify a branch/ref to fetch from (defaults to default branch).
  * Requires GITHUB_TOKEN or gh auth to have access to the target repo.
  */
-function fetchGitHubFile(owner, repo, filePath) {
+function fetchGitHubFile(owner, repo, filePath, ref) {
     try {
-        const result = (0, child_process_1.execSync)(`gh api "/repos/${owner}/${repo}/contents/${filePath}" --jq '.content' 2>/dev/null`, { encoding: 'utf-8', timeout: 10000 }).trim();
+        const refParam = ref ? `?ref=${encodeURIComponent(ref)}` : '';
+        const result = (0, child_process_1.execSync)(`gh api "/repos/${owner}/${repo}/contents/${filePath}${refParam}" --jq '.content' 2>/dev/null`, { encoding: 'utf-8', timeout: 10000 }).trim();
         if (!result)
             return null;
         // GitHub API returns base64-encoded content
@@ -51,6 +53,43 @@ function fetchGitHubFile(owner, repo, filePath) {
     catch {
         return null;
     }
+}
+/**
+ * Auto-detect related repos from CLAUDE.md content.
+ * Looks for patterns like:
+ *   - "See @../reponame/CLAUDE.md"
+ *   - "(source in `../reponame/`)"
+ *   - "See @../reponame/CLAUDE.md for ..."
+ * Resolves relative references against the current repo's org.
+ */
+function detectRelatedRepos(claudeMdContent, currentOrg) {
+    const repos = new Set();
+    // Match patterns like "../reponame/" or "../reponame/CLAUDE.md"
+    const patterns = [
+        /See\s+@\.\.\/([a-zA-Z0-9_-]+)\//gi,
+        /source\s+in\s+[`"']?\.\.\/([a-zA-Z0-9_-]+)\/?[`"']?/gi,
+        /\(in\s+`\.\.\/([a-zA-Z0-9_-]+)\/`\)/gi,
+        /separate\s+repo.*?[`"']?\.\.\/([a-zA-Z0-9_-]+)\/?[`"']?/gi,
+        /are\s+in\s+[`"']?\.\.\/([a-zA-Z0-9_-]+)\//gi,
+        /[`"']\.\.\/([a-zA-Z0-9_-]+)\/[^`"']*[`"']/g,
+    ];
+    for (const pattern of patterns) {
+        let match;
+        while ((match = pattern.exec(claudeMdContent)) !== null) {
+            repos.add(`${currentOrg}/${match[1]}`);
+        }
+    }
+    return [...repos];
+}
+/**
+ * Get the current repo's org/owner from GITHUB_REPOSITORY env var.
+ */
+function getCurrentOrg() {
+    const repo = process.env.GITHUB_REPOSITORY;
+    if (!repo)
+        return null;
+    const parts = repo.split('/');
+    return parts.length >= 2 ? parts[0] : null;
 }
 /**
  * Load architecture context from CLAUDE.md and .reviewpal.yml
@@ -95,14 +134,24 @@ function loadArchitectureContext(repoRoot) {
         lessonsContext = truncateAtSectionBoundary(content, 3000);
     }
     // Load local CLAUDE.md
+    let claudeMdContent = '';
     const claudeMdPath = (0, path_1.join)(root, 'CLAUDE.md');
     if ((0, fs_1.existsSync)(claudeMdPath)) {
-        const content = (0, fs_1.readFileSync)(claudeMdPath, 'utf-8');
-        const truncated = truncateAtSectionBoundary(content, MAX_CONTEXT_CHARS);
+        claudeMdContent = (0, fs_1.readFileSync)(claudeMdPath, 'utf-8');
+        const truncated = truncateAtSectionBoundary(claudeMdContent, MAX_CONTEXT_CHARS);
         contextParts.push(`## Project Architecture (from CLAUDE.md)\n\n${truncated}`);
     }
-    // Auto-fetch CLAUDE.md from related repos
-    for (const repoRef of config.related_repos) {
+    // Collect related repos: explicit config + auto-detected from CLAUDE.md
+    const relatedRepos = new Set(config.related_repos);
+    const currentOrg = getCurrentOrg();
+    if (claudeMdContent && currentOrg) {
+        for (const detected of detectRelatedRepos(claudeMdContent, currentOrg)) {
+            relatedRepos.add(detected);
+        }
+    }
+    // Fetch CLAUDE.md from each related repo
+    const relatedReposLoaded = [];
+    for (const repoRef of relatedRepos) {
         const parts = repoRef.split('/');
         if (parts.length !== 2)
             continue;
@@ -111,6 +160,7 @@ function loadArchitectureContext(repoRoot) {
         if (content) {
             const truncated = truncateAtSectionBoundary(content, 2000);
             contextParts.push(`## Related repo: ${owner}/${repo} (from CLAUDE.md)\n\n${truncated}`);
+            relatedReposLoaded.push(`${owner}/${repo}`);
         }
     }
     // Load additional context files (local or cross-repo)
@@ -149,6 +199,7 @@ function loadArchitectureContext(repoRoot) {
         architectureContext: contextParts.join('\n\n'),
         lessonsContext,
         config,
+        relatedReposLoaded,
     };
 }
 /**
