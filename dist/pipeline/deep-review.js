@@ -62,8 +62,11 @@ Do NOT report (these are NEVER findings):
 - Performance issues that only matter at scale the project hasn't reached
 - React/frontend best practices: key props, memoization, re-render optimization, prop drilling
 - Missing null checks on values that come from the application's own code (not external input)
+- Missing optional chaining (?.) on fields that are required by the TypeScript type definition or API contract. If the type says the field exists, trust the type system.
+- Defensive coding suggestions like "add a guard to ensure X is an array" when the code already handles it, or the type guarantees it
 - Polling intervals, refetch frequencies, or caching strategies (these are product decisions, not bugs)
 - Client-side localStorage/sessionStorage parsing (users can't cause server outages with bad localStorage)
+- .sqlx cache files, lock files, or generated files (only review source code written by humans)
 
 SELF-CHECK: Before including ANY finding, ask yourself:
 1. Can I describe the EXACT sequence of normal user actions that triggers this?

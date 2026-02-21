@@ -22,6 +22,7 @@ import { loadArchitectureContext } from './pipeline/context.js';
 import { triagePR } from './pipeline/triage.js';
 import { reviewPrioritizedFiles } from './pipeline/deep-review.js';
 import { runAdversarialReview } from './pipeline/adversarial.js';
+import { validateFindings } from './pipeline/validate.js';
 import { computeVerdict } from './pipeline/verdict.js';
 import {
   FileAnalysis,
@@ -159,13 +160,31 @@ async function runReview(
 
     spinner.succeed(`Review complete (${deepReviews.length} files deep-reviewed, ${adversarialFindings.length} adversarial findings)`);
 
+    // Validate findings (filter false positives)
+    const totalFindings = deepReviews.reduce((s, r) => s + r.critical.length, 0) + adversarialFindings.length;
+    let validatedDeep = deepReviews;
+    let validatedAdversarial = adversarialFindings;
+    if (totalFindings > 0) {
+      spinner.start(`Validating ${totalFindings} finding(s)...`);
+      const validation = await validateFindings(
+        client, filesToAnalyze, deepReviews, adversarialFindings, options.model
+      );
+      validatedDeep = validation.deepReviews;
+      validatedAdversarial = validation.adversarialFindings;
+      if (validation.filteredCount > 0) {
+        spinner.succeed(`Filtered ${validation.filteredCount} false positive(s)`);
+      } else {
+        spinner.succeed(`All ${totalFindings} finding(s) validated`);
+      }
+    }
+
     // Compute verdict
-    const verdict = computeVerdict(deepReviews, adversarialFindings);
+    const verdict = computeVerdict(validatedDeep, validatedAdversarial);
     const verdictEmoji = verdict.verdict === 'BLOCK' ? '🔴' : verdict.verdict === 'WARN' ? '🟡' : '🟢';
     spinner.info(`Verdict: ${verdictEmoji} ${verdict.verdict} - ${verdict.reason}`);
 
-    // Build ReviewResult
-    const fileAnalyses: FileAnalysis[] = deepReviews.map(dr => ({
+    // Build ReviewResult (use validated findings)
+    const fileAnalyses: FileAnalysis[] = validatedDeep.map(dr => ({
       filename: dr.filename,
       hunks: [{
         hunk: {
@@ -193,8 +212,8 @@ async function runReview(
       totalHunks: totalHunks,
       totalProcessingTime: Date.now() - startTime,
       triage: triageResult,
-      deepReviews,
-      adversarialFindings,
+      deepReviews: validatedDeep,
+      adversarialFindings: validatedAdversarial,
       verdict,
     };
 

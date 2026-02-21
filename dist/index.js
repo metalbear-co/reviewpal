@@ -24,6 +24,7 @@ const context_js_1 = require("./pipeline/context.js");
 const triage_js_1 = require("./pipeline/triage.js");
 const deep_review_js_1 = require("./pipeline/deep-review.js");
 const adversarial_js_1 = require("./pipeline/adversarial.js");
+const validate_js_1 = require("./pipeline/validate.js");
 const verdict_js_1 = require("./pipeline/verdict.js");
 const VERSION = '3.2.0';
 const DEFAULT_MODEL = 'gemini-2.5-pro';
@@ -117,12 +118,28 @@ async function runReview(input, options) {
             (0, adversarial_js_1.runAdversarialReview)(client, filesToAnalyze, triageResult, architectureContext, lessonsContext, config, options.model, adversarialBudget),
         ]);
         spinner.succeed(`Review complete (${deepReviews.length} files deep-reviewed, ${adversarialFindings.length} adversarial findings)`);
+        // Validate findings (filter false positives)
+        const totalFindings = deepReviews.reduce((s, r) => s + r.critical.length, 0) + adversarialFindings.length;
+        let validatedDeep = deepReviews;
+        let validatedAdversarial = adversarialFindings;
+        if (totalFindings > 0) {
+            spinner.start(`Validating ${totalFindings} finding(s)...`);
+            const validation = await (0, validate_js_1.validateFindings)(client, filesToAnalyze, deepReviews, adversarialFindings, options.model);
+            validatedDeep = validation.deepReviews;
+            validatedAdversarial = validation.adversarialFindings;
+            if (validation.filteredCount > 0) {
+                spinner.succeed(`Filtered ${validation.filteredCount} false positive(s)`);
+            }
+            else {
+                spinner.succeed(`All ${totalFindings} finding(s) validated`);
+            }
+        }
         // Compute verdict
-        const verdict = (0, verdict_js_1.computeVerdict)(deepReviews, adversarialFindings);
+        const verdict = (0, verdict_js_1.computeVerdict)(validatedDeep, validatedAdversarial);
         const verdictEmoji = verdict.verdict === 'BLOCK' ? '🔴' : verdict.verdict === 'WARN' ? '🟡' : '🟢';
         spinner.info(`Verdict: ${verdictEmoji} ${verdict.verdict} - ${verdict.reason}`);
-        // Build ReviewResult
-        const fileAnalyses = deepReviews.map(dr => ({
+        // Build ReviewResult (use validated findings)
+        const fileAnalyses = validatedDeep.map(dr => ({
             filename: dr.filename,
             hunks: [{
                     hunk: {
@@ -149,8 +166,8 @@ async function runReview(input, options) {
             totalHunks: totalHunks,
             totalProcessingTime: Date.now() - startTime,
             triage: triageResult,
-            deepReviews,
-            adversarialFindings,
+            deepReviews: validatedDeep,
+            adversarialFindings: validatedAdversarial,
             verdict,
         };
         result.totalProcessingTime = Date.now() - startTime;
