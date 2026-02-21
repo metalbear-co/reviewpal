@@ -93,11 +93,6 @@ function formatFriendlyReviewResult(result) {
             parts.push(`\n*Reviewed ${result.deepReviews.length} priority files out of ${result.files.length + skipped} total.*\n`);
         }
     }
-    if (!hasCriticalIssues && (!result.adversarialFindings || result.adversarialFindings.length === 0)) {
-        if (!result.verdict || result.verdict.verdict === 'CLEAR') {
-            return parts.join('\n') + '\n\n✅ No critical issues found!';
-        }
-    }
     return parts.join('\n');
 }
 //# sourceMappingURL=friendly.js.map

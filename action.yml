@@ -246,7 +246,9 @@ runs:
               noIssuesMsg += `## 📋 What is this PR about\n\n${prSummary}\n\n---\n\n`;
             }
 
-            noIssuesMsg += `✅ **No critical issues found**`;
+            if (!verdict) {
+              noIssuesMsg += `✅ **No critical issues found**`;
+            }
             
             // Check for existing comment
             const { data: comments } = await github.rest.issues.listComments({

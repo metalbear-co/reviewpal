@@ -35,16 +35,23 @@ FULL DIFF for ${file.filename} (+${file.additions}/-${file.deletions}):
 ${fullDiff.slice(0, 10000)}
 \`\`\`
 
-Report CRITICAL issues only:
-- Security vulnerabilities (exposed secrets, SQL injection, XSS)
-- Will crash in production (unhandled errors, null refs, race conditions)
-- Data loss risks (missing validation, destructive ops)
-- Major performance problems (N+1 queries, infinite loops, memory leaks)
+Report ONLY issues that would cause an INCIDENT if this code were deployed to production.
+Ask yourself: "Would this wake someone up at 3am?" If not, don't report it.
+
+CRITICAL means:
+- Security: exploitable vulnerability with a concrete attack vector (not theoretical)
+- Crash: will throw/panic in production under normal usage (not edge cases that "could" happen)
+- Data loss: destructive operation on real data without safeguards
+- Performance: will degrade under current production load (not "could be slow someday")
 
 Pay attention to BOTH additions and deletions. A deletion that removes important validation or error handling is a critical issue.
 
-Ignore: style, naming, minor optimizations, comments, test files.
-Do NOT suggest adding try-catch or null checks where a failure would correctly surface a real bug.
+Do NOT report:
+- Style, naming, minor optimizations, comments, test files
+- Architectural suggestions or "better ways" to do something
+- Hypothetical issues that require unusual inputs or unlikely conditions
+- Missing error handling where the failure would correctly surface a real bug
+- Performance issues that only matter at scale the project hasn't reached
 
 Respond in JSON:
 {

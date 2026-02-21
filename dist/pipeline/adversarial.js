@@ -22,7 +22,8 @@ Focus on:
 - Race conditions that could be exploited
 - Missing rate limiting on sensitive endpoints
 
-Do NOT flag theoretical issues. Only flag things with a concrete attack vector.`,
+Do NOT flag theoretical issues. Only flag things with a concrete attack vector that an attacker could exploit TODAY.
+If you can't describe the exact steps to exploit it, don't flag it.`,
         focusTypes: ['security'],
     },
     {
@@ -40,7 +41,9 @@ Focus on:
 - API contract changes (new required fields, removed fields, changed semantics)
 
 Compare the removed lines (-) with the added lines (+) carefully.
-The most dangerous regressions are where the code LOOKS correct but behaves differently in edge cases.`,
+The most dangerous regressions are where the code LOOKS correct but behaves differently in edge cases.
+
+Only flag regressions that would break EXISTING behavior. Do NOT flag missing features or "nice to have" improvements.`,
         focusTypes: ['regression', 'crash', 'data-loss'],
     },
     {
@@ -57,7 +60,9 @@ Focus on:
 - Missing backpressure or rate limiting
 - Error paths that skip cleanup (missing finally/defer/drop)
 
-Only flag issues that would manifest in production under real load, not theoretical concerns.`,
+Only flag issues that would cause an outage or degradation under CURRENT production load.
+"Could be slow with 10x data" is NOT a finding. "Will OOM with current traffic" IS a finding.
+Architectural suggestions like "move filtering to the server" are NOT findings.`,
         focusTypes: ['performance', 'crash'],
     },
 ];
@@ -109,7 +114,7 @@ PR SUMMARY: ${triageResult.prSummary}
 CODE TO REVIEW:
 ${fileDiffs.slice(0, 15000)}
 
-Find the ONE most critical issue from your perspective. If you find nothing exploitable or dangerous, return an empty findings array.
+Find the ONE most critical issue from your perspective. If you find nothing that would cause a production incident, return an EMPTY findings array. It is completely fine and expected to return zero findings. Most code is fine.
 
 Respond in JSON:
 {
@@ -124,7 +129,7 @@ Respond in JSON:
   ]
 }
 
-Return at most 2 findings. Quality over quantity. Only real issues with concrete impact.`;
+Return at most 1 finding. Only report something you are highly confident would cause a real problem in production. Architectural suggestions, "nice to haves", and hypothetical concerns are NOT findings.`;
     const response = await client.models.generateContent({
         model,
         contents: prompt,
