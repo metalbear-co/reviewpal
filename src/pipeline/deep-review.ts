@@ -46,23 +46,33 @@ FULL DIFF for ${file.filename} (+${file.additions}/-${file.deletions}):
 ${fullDiff.slice(0, 10000)}
 \`\`\`
 
-Report ONLY issues that would cause an INCIDENT if this code were deployed to production.
-Ask yourself: "Would this wake someone up at 3am?" If not, don't report it.
+Report ONLY issues that would cause a PRODUCTION OUTAGE, DATA CORRUPTION, or SECURITY BREACH.
+The bar is: "Would a senior on-call engineer page the team about this?" If not, don't report it.
 
-CRITICAL means:
-- Security: exploitable vulnerability with a concrete attack vector (not theoretical)
-- Crash: will throw/panic in production under normal usage (not edge cases that "could" happen)
-- Data loss: destructive operation on real data without safeguards
-- Performance: will degrade under current production load (not "could be slow someday")
+STRICT type definitions:
+- security: An attacker can exploit this TODAY. You can describe the exact HTTP request or input that triggers it.
+- crash: The application process will terminate or an unhandled exception will propagate to the user. NOT "a value might be wrong" or "a component might re-render incorrectly."
+- data-loss: User data will be permanently deleted or corrupted. NOT "a cache might be stale."
+- performance: The application will become unresponsive or OOM under CURRENT production traffic. NOT "this could be optimized."
 
 Pay attention to BOTH additions and deletions. A deletion that removes important validation or error handling is a critical issue.
 
-Do NOT report:
+Do NOT report (these are NEVER findings):
 - Style, naming, minor optimizations, comments, test files
-- Architectural suggestions or "better ways" to do something
-- Hypothetical issues that require unusual inputs or unlikely conditions
-- Missing error handling where the failure would correctly surface a real bug
+- Architectural suggestions or "better ways" to do something (e.g., "move filtering to server", "use server-side pagination")
+- Hypothetical issues that require unusual inputs, malformed data, or unlikely conditions
+- Missing error handling where the failure would correctly surface as a visible bug (not silent corruption)
 - Performance issues that only matter at scale the project hasn't reached
+- React/frontend best practices: key props, memoization, re-render optimization, prop drilling
+- Missing null checks on values that come from the application's own code (not external input)
+- Polling intervals, refetch frequencies, or caching strategies (these are product decisions, not bugs)
+- Client-side localStorage/sessionStorage parsing (users can't cause server outages with bad localStorage)
+
+SELF-CHECK: Before including ANY finding, ask yourself:
+1. Can I describe the EXACT sequence of normal user actions that triggers this?
+2. Would the result be an outage, data loss, or security breach (not just a console error or wrong UI state)?
+3. Would a senior engineer agree this is a production incident, not a code quality nit?
+If any answer is NO, do not include it.
 
 Respond in JSON:
 {
@@ -78,7 +88,7 @@ Respond in JSON:
   ]
 }
 
-If no CRITICAL issues, return empty critical array.`;
+Return an empty critical array unless you are HIGHLY confident the issue would cause a production incident. Most code is fine. An empty array is the expected, normal result.`;
 
   const response = await client.models.generateContent({
     model,

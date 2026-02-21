@@ -153,7 +153,17 @@ PR SUMMARY: ${triageResult.prSummary}
 CODE TO REVIEW:
 ${fileDiffs.slice(0, 15000)}
 
-Find the ONE most critical issue from your perspective. If you find nothing that would cause a production incident, return an EMPTY findings array. It is completely fine and expected to return zero findings. Most code is fine.
+Find the ONE most critical issue from your perspective. If you find nothing that would cause a production incident, return an EMPTY findings array. It is completely fine and expected to return zero findings. Most code is fine. An empty array is the correct answer for most PRs.
+
+NEVER report these (automatic disqualifiers):
+- Architectural suggestions ("move X to server", "use pagination", "add caching")
+- Frontend best practices (React keys, memoization, polling intervals, re-renders)
+- Missing null checks on values from the application's own internal code
+- Client-side storage parsing (localStorage, sessionStorage)
+- Hypothetical issues requiring unlikely inputs or unusual conditions
+- Code quality, style, naming, or "better ways" to do something
+
+SELF-CHECK before reporting: Can you describe the EXACT user actions that trigger a production outage, data loss, or security breach? If not, return empty findings.
 
 Respond in JSON:
 {
@@ -168,7 +178,7 @@ Respond in JSON:
   ]
 }
 
-Return at most 1 finding. Only report something you are highly confident would cause a real problem in production. Architectural suggestions, "nice to haves", and hypothetical concerns are NOT findings.`;
+Return at most 1 finding. Only report something you are highly confident would cause a real production incident.`;
 
   const response = await client.models.generateContent({
     model,
